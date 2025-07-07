@@ -393,7 +393,7 @@ export class WAMonitoringService {
 
         this.waInstances[instanceName]?.client?.ws?.close();
 
-        this.waInstances[instanceName].instance.qrcode = { count: 0 };
+        this.waInstances[instanceName].instance.qrcode = { count: 0, startTime: Date.now() };
         this.waInstances[instanceName].stateConnection.state = 'close';
       } catch (error) {
         this.logger.error({

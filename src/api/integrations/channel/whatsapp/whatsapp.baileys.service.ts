@@ -222,7 +222,7 @@ export class BaileysStartupService extends ChannelStartupService {
     private readonly providerFiles: ProviderFiles,
   ) {
     super(configService, eventEmitter, prismaRepository, chatwootCache);
-    this.instance.qrcode = { count: 0 };
+    this.instance.qrcode = { count: 0, startTime: Date.now() };
 
     this.authStateProvider = new AuthStateProvider(this.providerFiles);
   }
@@ -287,7 +287,11 @@ export class BaileysStartupService extends ChannelStartupService {
 
   private async connectionUpdate({ qr, connection, lastDisconnect }: Partial<ConnectionState>) {
     if (qr) {
-      if (this.instance.qrcode.count === this.configService.get<QrCode>('QRCODE').LIMIT) {
+      // Check if time limit has been exceeded (LIMIT is in seconds)
+      const timeLimit = this.configService.get<QrCode>('QRCODE').LIMIT;
+      const elapsedTime = Math.floor((Date.now() - this.instance.qrcode.startTime) / 1000);
+      
+      if (elapsedTime >= timeLimit) {
         this.sendDataWebhook(Events.QRCODE_UPDATED, {
           message: 'QR code limit reached, please login again',
           statusCode: DisconnectReason.badSession,
