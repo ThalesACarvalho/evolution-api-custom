@@ -593,7 +593,7 @@ export class ConfigService {
         VERSION: process.env?.CONFIG_SESSION_PHONE_VERSION || null,
       },
       QRCODE: {
-        LIMIT: Number.parseInt(process.env.QRCODE_LIMIT) || 30,
+        LIMIT: Number.parseInt(process.env.QRCODE_LIMIT) || 3600,
         COLOR: process.env.QRCODE_COLOR || '#198754',
       },
       TYPEBOT: {
