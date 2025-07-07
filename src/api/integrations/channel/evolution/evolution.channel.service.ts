@@ -58,6 +58,7 @@ export class EvolutionStartupService extends ChannelStartupService {
       code: this.instance.qrcode?.code,
       base64: this.instance.qrcode?.base64,
       count: this.instance.qrcode?.count,
+      startTime: this.instance.qrcode?.startTime,
     };
   }
 

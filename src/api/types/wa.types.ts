@@ -44,6 +44,7 @@ export declare namespace wa {
     pairingCode?: string;
     base64?: string;
     code?: string;
+    startTime?: number;
   };
 
   export type Instance = {
