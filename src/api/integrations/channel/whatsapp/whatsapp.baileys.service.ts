@@ -282,6 +282,7 @@ export class BaileysStartupService extends ChannelStartupService {
       code: this.instance.qrcode?.code,
       base64: this.instance.qrcode?.base64,
       count: this.instance.qrcode?.count,
+      startTime: this.instance.qrcode?.startTime,
     };
   }
 
@@ -289,6 +290,12 @@ export class BaileysStartupService extends ChannelStartupService {
     if (qr) {
       // Check if time limit has been exceeded (LIMIT is in seconds)
       const timeLimit = this.configService.get<QrCode>('QRCODE').LIMIT;
+      
+      // Initialize startTime if not set (for backward compatibility)
+      if (!this.instance.qrcode.startTime) {
+        this.instance.qrcode.startTime = Date.now();
+      }
+      
       const elapsedTime = Math.floor((Date.now() - this.instance.qrcode.startTime) / 1000);
       
       if (elapsedTime >= timeLimit) {
