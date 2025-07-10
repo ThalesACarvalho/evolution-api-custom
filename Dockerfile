@@ -11,6 +11,7 @@ WORKDIR /evolution
 
 COPY ./package.json ./tsconfig.json ./
 
+RUN npm install --package-lock-only
 RUN npm install
 
 COPY ./src ./src
