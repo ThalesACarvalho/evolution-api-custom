@@ -9,10 +9,8 @@ LABEL contact="contato@evolution-api.com"
 
 WORKDIR /evolution
 
-COPY ./package.json ./tsconfig.json ./
-
-RUN npm install --package-lock-only
-RUN npm install
+COPY ./package.json ./package-lock.json ./tsconfig.json ./
+RUN npm ci
 
 COPY ./src ./src
 COPY ./public ./public
