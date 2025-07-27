@@ -1,4 +1,5 @@
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { HttpProxyAgent } from 'http-proxy-agent';
 
 type Proxy = {
   host: string;
@@ -9,15 +10,21 @@ type Proxy = {
 };
 
 export function makeProxyAgent(proxy: Proxy | string) {
+  let proxyUrl: string;
+
   if (typeof proxy === 'string') {
-    return new HttpsProxyAgent(proxy);
+    proxyUrl = proxy;
+  } else {
+    const { host, password, port, protocol, username } = proxy;
+    proxyUrl = `${protocol}://${username && password ? `${username}:${password}@` : ''}${host}:${port}`;
   }
 
-  const { host, password, port, protocol, username } = proxy;
-  let proxyUrl = `${protocol}://${host}:${port}`;
+  const agentOptions = {
+    rejectUnauthorized: false, // Ignora certificados autoassinados
+  };
 
-  if (username && password) {
-    proxyUrl = `${protocol}://${username}:${password}@${host}:${port}`;
-  }
-  return new HttpsProxyAgent(proxyUrl);
+  // Se for HTTP → usa HttpProxyAgent, se for HTTPS → usa HttpsProxyAgent
+  return proxyUrl.startsWith('http:')
+    ? new HttpProxyAgent({ ...agentOptions, ...{ proxy: proxyUrl } })
+    : new HttpsProxyAgent({ ...agentOptions, ...{ proxy: proxyUrl } });
 }
