@@ -30,7 +30,9 @@ export class ProxyController {
 
     if (data.host) {
       const testResult = await this.testProxy(data);
-      if (!testResult.success) {
+
+      // ✅ Aceita o proxy se for válido OU se o único problema for SSL (error8)
+      if (!testResult.success && testResult.code !== 'error8') {
         throw new BadRequestException(
           `[${testResult.code}] ${testResult.reason} (Server IP: ${testResult.serverIp}, Proxy IP: ${testResult.proxyIp})`
         );
@@ -57,19 +59,57 @@ export class ProxyController {
       proxyIp: '',
     };
 
+    const testUrls = {
+      http: 'http://api.ipify.org',
+      https: 'https://api.ipify.org',
+    };
+
     try {
       // 1. IP do servidor sem proxy
-      const serverIpResponse = await axios.get('https://icanhazip.com/');
+      const serverIpResponse = await axios.get(testUrls.http, { timeout: 5000 });
       result.serverIp = serverIpResponse.data.trim();
 
-      // 2. IP via proxy
-      const proxyResponse = await axios.get('https://icanhazip.com/', {
-        httpsAgent: makeProxyAgent(proxy),
-        timeout: 5000,
-      });
-      result.proxyIp = proxyResponse.data.trim();
+      // 2. Testa via HTTP (menos bloqueios)
+      try {
+        const proxyResponse = await axios.get(testUrls.http, {
+          httpAgent: makeProxyAgent({ ...proxy, protocol: 'http' }),
+          timeout: 7000,
+        });
+        result.proxyIp = proxyResponse.data.trim();
+      } catch (httpError) {
+        // 3. Fallback via HTTPS (aceita SSL inseguro)
+        try {
+          const httpsResponse = await axios.get(testUrls.https, {
+            httpsAgent: makeProxyAgent({ ...proxy, protocol: 'https' }),
+            timeout: 7000,
+          });
+          result.proxyIp = httpsResponse.data.trim();
+        } catch (httpsError) {
+          if (
+            axios.isAxiosError(httpsError) &&
+            httpsError.message.toLowerCase().includes('self signed')
+          ) {
+            result.code = 'error8';
+            result.reason =
+              'SSL certificate issue (self-signed or untrusted). Proxy accepted due to allowed SSL exception.';
+            result.success = true; // ✅ Considera válido mesmo com problema de SSL
+            return result;
+          } else {
+            throw httpsError;
+          }
+        }
+      }
 
-      // 3. Comparação
+      // 4. Verifica se obteve um proxyIp válido
+      if (!result.proxyIp) {
+        if (!result.code) {
+          result.code = 'error5';
+          result.reason = 'Proxy did not return any valid IP.';
+        }
+        return result;
+      }
+
+      // 5. Compara IPs
       if (result.serverIp !== result.proxyIp) {
         result.success = true;
         result.code = 'ok1';
@@ -88,9 +128,9 @@ export class ProxyController {
         } else if (error.code === 'ETIMEDOUT') {
           result.code = 'error3';
           result.reason = 'Connection timed out (proxy too slow or blocked).';
-        } else if (error.response?.status === 407) {
-          result.code = 'error4';
-          result.reason = 'Proxy authentication failed (wrong user/pass).';
+        } else if (error.response?.status === 403) {
+          result.code = 'error7';
+          result.reason = 'Access forbidden (proxy blocked or wrong credentials).';
         } else {
           result.code = 'error5';
           result.reason = `Axios error: ${error.message}`;
