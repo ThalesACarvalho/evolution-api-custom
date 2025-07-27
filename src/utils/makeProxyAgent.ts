@@ -23,8 +23,9 @@ export function makeProxyAgent(proxy: Proxy | string) {
     rejectUnauthorized: false, // Ignora certificados autoassinados
   };
 
-  // Se for HTTP → usa HttpProxyAgent, se for HTTPS → usa HttpsProxyAgent
-  return proxyUrl.startsWith('http:')
-    ? new HttpProxyAgent({ ...agentOptions, ...{ proxy: proxyUrl } })
-    : new HttpsProxyAgent({ ...agentOptions, ...{ proxy: proxyUrl } });
+  if (proxyUrl.startsWith('http:')) {
+    return new HttpProxyAgent(proxyUrl, agentOptions);
+  } else {
+    return new HttpsProxyAgent(proxyUrl, agentOptions);
+  }
 }
