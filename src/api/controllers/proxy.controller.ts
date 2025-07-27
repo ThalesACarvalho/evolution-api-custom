@@ -29,9 +29,11 @@ export class ProxyController {
     }
 
     if (data.host) {
-      const testProxy = await this.testProxy(data);
-      if (!testProxy) {
-        throw new BadRequestException('Invalid proxy');
+      const testResult = await this.testProxy(data);
+      if (!testResult.success) {
+        throw new BadRequestException(
+          `[${testResult.code}] ${testResult.reason} (Server IP: ${testResult.serverIp}, Proxy IP: ${testResult.proxyIp})`
+        );
       }
     }
 
@@ -47,22 +49,59 @@ export class ProxyController {
   }
 
   public async testProxy(proxy: ProxyDto) {
-    try {
-      const serverIp = await axios.get('https://icanhazip.com/');
-      const response = await axios.get('https://icanhazip.com/', {
-        httpsAgent: makeProxyAgent(proxy),
-      });
+    const result = {
+      success: false,
+      code: '',
+      reason: '',
+      serverIp: '',
+      proxyIp: '',
+    };
 
-      return response?.data !== serverIp?.data;
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.data) {
-        logger.error('testProxy error: ' + error.response.data);
-      } else if (axios.isAxiosError(error)) {
-        logger.error('testProxy error: ');
+    try {
+      // 1. IP do servidor sem proxy
+      const serverIpResponse = await axios.get('https://icanhazip.com/');
+      result.serverIp = serverIpResponse.data.trim();
+
+      // 2. IP via proxy
+      const proxyResponse = await axios.get('https://icanhazip.com/', {
+        httpsAgent: makeProxyAgent(proxy),
+        timeout: 5000,
+      });
+      result.proxyIp = proxyResponse.data.trim();
+
+      // 3. Comparação
+      if (result.serverIp !== result.proxyIp) {
+        result.success = true;
+        result.code = 'ok1';
+        result.reason = 'Proxy is working. IP changed successfully.';
       } else {
-        logger.error('testProxy error: ');
+        result.code = 'error1';
+        result.reason = 'Proxy connected, but IP did not change (transparent proxy?).';
       }
-      return false;
+
+      return result;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        if (error.code === 'ECONNREFUSED') {
+          result.code = 'error2';
+          result.reason = 'Connection refused (proxy offline or wrong host/port).';
+        } else if (error.code === 'ETIMEDOUT') {
+          result.code = 'error3';
+          result.reason = 'Connection timed out (proxy too slow or blocked).';
+        } else if (error.response?.status === 407) {
+          result.code = 'error4';
+          result.reason = 'Proxy authentication failed (wrong user/pass).';
+        } else {
+          result.code = 'error5';
+          result.reason = `Axios error: ${error.message}`;
+        }
+      } else {
+        result.code = 'error6';
+        result.reason = `Unknown error: ${String(error)}`;
+      }
+
+      logger.error(`testProxy failed [${result.code}]: ${result.reason}`);
+      return result;
     }
   }
 }
