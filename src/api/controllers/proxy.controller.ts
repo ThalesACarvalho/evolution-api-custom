@@ -20,6 +20,14 @@ export class ProxyController {
       throw new NotFoundException(`The "${instance.instanceName}" instance does not exist`);
     }
 
+    let testResult = {
+      success: false,
+      code: '',
+      reason: '',
+      serverIp: '',
+      proxyIp: '',
+    };
+
     if (!data?.enabled) {
       data.host = '';
       data.port = '';
@@ -29,22 +37,25 @@ export class ProxyController {
     }
 
     if (data.host) {
-      const testResult = await this.testProxy(data);
+      testResult = await this.testProxy(data);
 
-      // ✅ Aceita proxy se for válido OU se o único problema for SSL (error8)
+      // ✅ Só rejeita se não for sucesso nem caso especial aceito
       if (!testResult.success && testResult.code !== 'error8' && testResult.code !== 'ok2') {
         throw new BadRequestException(
           `[${testResult.code}] ${testResult.reason} (Server IP: ${testResult.serverIp}, Proxy IP: ${testResult.proxyIp})`
         );
       }
 
-      // ✅ Log informativo quando passa no teste
       logger.log(
         `Proxy test passed [${testResult.code}]: ${testResult.reason} (Server IP: ${testResult.serverIp}, Proxy IP: ${testResult.proxyIp})`
       );
     }
 
-    return this.proxyService.create(instance, data);
+    // ✅ Retorna também os detalhes do teste no JSON
+    return {
+      ...this.proxyService.create(instance, data),
+      testResult,
+    };
   }
 
   public async findProxy(instance: InstanceDto) {
