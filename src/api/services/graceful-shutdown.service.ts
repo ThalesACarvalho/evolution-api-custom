@@ -58,7 +58,7 @@ export class GracefulShutdownService {
       this.logger.info('Graceful shutdown completed');
       process.exit(0);
     } catch (error) {
-      this.logger.error('Error during graceful shutdown:', error);
+      this.logger.error(`Error during graceful shutdown: ${error?.toString()}`);
       process.exit(1);
     } finally {
       if (this.shutdownTimeout) {
@@ -89,7 +89,7 @@ export class GracefulShutdownService {
       this.logger.info(`Graceful shutdown completed in ${shutdownTime}ms`);
 
     } catch (error) {
-      this.logger.error('Error during graceful shutdown process:', error);
+      this.logger.error(`Error during graceful shutdown process: ${error?.toString()}`);
       throw error;
     }
   }
@@ -121,7 +121,7 @@ export class GracefulShutdownService {
           this.logger.debug(`Saved state for instance: ${instanceName}`);
 
         } catch (error) {
-          this.logger.error(`Failed to save state for instance ${instanceName}:`, error);
+          this.logger.error(`Failed to save state for instance ${instanceName}: ${error?.toString()}`);
         }
       });
 
@@ -129,7 +129,7 @@ export class GracefulShutdownService {
       this.logger.info(`Attempted to save ${instances.length} instance states`);
 
     } catch (error) {
-      this.logger.error('Failed to save instance states:', error);
+      this.logger.error(`Failed to save instance states: ${error?.toString()}`);
       throw error;
     }
   }
@@ -150,7 +150,7 @@ export class GracefulShutdownService {
           }
 
         } catch (error) {
-          this.logger.error(`Failed to close connection for instance ${instanceName}:`, error);
+          this.logger.error(`Failed to close connection for instance ${instanceName}: ${error?.toString()}`);
         }
       });
 
@@ -158,7 +158,7 @@ export class GracefulShutdownService {
       this.logger.info(`Attempted to close ${instances.length} connections`);
 
     } catch (error) {
-      this.logger.error('Failed to close connections:', error);
+      this.logger.error(`Failed to close connections: ${error?.toString()}`);
       throw error;
     }
   }
@@ -193,7 +193,7 @@ export class GracefulShutdownService {
       this.logger.debug(`Successfully closed connection for instance: ${instanceName}`);
 
     } catch (error) {
-      this.logger.warn(`Timeout or error closing connection for ${instanceName}:`, error.message);
+      this.logger.warn(`Timeout or error closing connection for ${instanceName}: ${error.message}`);
       // Force close if graceful close fails
       if (instance.client?.ws) {
         instance.client.ws.terminate();
@@ -214,7 +214,7 @@ export class GracefulShutdownService {
       this.logger.info('Resource cleanup completed');
 
     } catch (error) {
-      this.logger.error('Failed to clean up resources:', error);
+      this.logger.error(`Failed to clean up resources: ${error?.toString()}`);
       throw error;
     }
   }

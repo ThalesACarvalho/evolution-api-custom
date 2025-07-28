@@ -44,7 +44,7 @@ export class ConnectionHealthService {
         await this.checkInstanceHealth(instanceName, instance);
       }
     } catch (error) {
-      this.logger.error('Health check failed:', error);
+      this.logger.error(`Health check failed: ${error?.toString()}`);
     }
   }
 
@@ -86,7 +86,7 @@ export class ConnectionHealthService {
       }
 
     } catch (error) {
-      this.logger.error(`Health check failed for instance ${instanceName}:`, error);
+      this.logger.error(`Health check failed for instance ${instanceName}: ${error?.toString()}`);
     }
   }
 
@@ -113,7 +113,7 @@ export class ConnectionHealthService {
       await Promise.race([pingTest, timeout]);
       return true;
     } catch (error) {
-      this.logger.debug(`Ping test failed for ${instanceName}:`, error.message);
+      this.logger.debug(`Ping test failed for ${instanceName}: ${error.message}`);
       return false;
     }
   }
@@ -129,7 +129,7 @@ export class ConnectionHealthService {
       await instance.connectToWhatsapp(instance.phoneNumber);
       
     } catch (error) {
-      this.logger.error(`Failed to handle connection mismatch for ${instanceName}:`, error);
+      this.logger.error(`Failed to handle connection mismatch for ${instanceName}: ${error?.toString()}`);
     }
   }
 
@@ -147,7 +147,7 @@ export class ConnectionHealthService {
       await instance.connectToWhatsapp(instance.phoneNumber);
       
     } catch (error) {
-      this.logger.error(`Failed to handle connection failure for ${instanceName}:`, error);
+      this.logger.error(`Failed to handle connection failure for ${instanceName}: ${error?.toString()}`);
     }
   }
 
@@ -168,7 +168,7 @@ export class ConnectionHealthService {
       await instance.connectToWhatsapp(instance.phoneNumber);
       
     } catch (error) {
-      this.logger.error(`Failed to handle connection timeout for ${instanceName}:`, error);
+      this.logger.error(`Failed to handle connection timeout for ${instanceName}: ${error?.toString()}`);
     }
   }
 
@@ -185,7 +185,7 @@ export class ConnectionHealthService {
     try {
       await this.cache.set(`connecting_time:${instanceName}`, Date.now().toString(), 300); // 5 minutes TTL
     } catch (error) {
-      this.logger.error(`Failed to set connecting time for ${instanceName}:`, error);
+      this.logger.error(`Failed to set connecting time for ${instanceName}: ${error?.toString()}`);
     }
   }
 
@@ -193,7 +193,7 @@ export class ConnectionHealthService {
     try {
       await this.cache.delete(`connecting_time:${instanceName}`);
     } catch (error) {
-      this.logger.error(`Failed to clear connecting time for ${instanceName}:`, error);
+      this.logger.error(`Failed to clear connecting time for ${instanceName}: ${error?.toString()}`);
     }
   }
 

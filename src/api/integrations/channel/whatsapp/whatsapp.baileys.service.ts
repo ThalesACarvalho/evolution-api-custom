@@ -700,7 +700,7 @@ export class BaileysStartupService extends ChannelStartupService {
 
       return await this.createClient(number);
     } catch (error) {
-      this.logger.error(`Failed to connect WhatsApp for instance ${this.instance.name}:`, error);
+      this.logger.error(`Failed to connect WhatsApp for instance ${this.instance.name}: ${error?.toString()}`);
       throw new InternalServerErrorException(error?.toString());
     }
   }

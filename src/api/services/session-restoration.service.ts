@@ -52,7 +52,7 @@ export class SessionRestorationService {
       await this.verifyRestoredConnections();
 
     } catch (error) {
-      this.logger.error('Session restoration failed:', error);
+      this.logger.error(`Session restoration failed: ${error?.toString()}`);
       throw error;
     }
   }
@@ -77,7 +77,7 @@ export class SessionRestorationService {
             restored++;
           }
         } catch (error) {
-          this.logger.error(`Failed to restore instance from Redis key ${key}:`, error);
+          this.logger.error(`Failed to restore instance from Redis key ${key}: ${error?.toString()}`);
         }
       }
 
@@ -85,7 +85,7 @@ export class SessionRestorationService {
       return restored;
 
     } catch (error) {
-      this.logger.error('Failed to restore from Redis cache:', error);
+      this.logger.error(`Failed to restore from Redis cache: ${error?.toString()}`);
       return 0;
     }
   }
@@ -127,9 +127,9 @@ export class SessionRestorationService {
             webhook: instance.Webhook ? {
               enabled: true,
               url: instance.Webhook.url,
-              events: instance.Webhook.events || [],
-              byEvents: instance.Webhook.byEvents,
-              base64: instance.Webhook.base64,
+              events: Array.isArray(instance.Webhook.events) ? instance.Webhook.events : [],
+              byEvents: instance.Webhook.webhookByEvents,
+              base64: instance.Webhook.webhookBase64,
             } : undefined,
             // Include chatwoot settings if available
             chatwootAccountId: instance.Chatwoot?.accountId,
@@ -155,7 +155,7 @@ export class SessionRestorationService {
           restored++;
 
         } catch (error) {
-          this.logger.error(`Failed to restore instance ${instance.name}:`, error);
+          this.logger.error(`Failed to restore instance ${instance.name}: ${error?.toString()}`);
         }
       }
 
@@ -163,7 +163,7 @@ export class SessionRestorationService {
       return restored;
 
     } catch (error) {
-      this.logger.error('Failed to restore from database:', error);
+      this.logger.error(`Failed to restore from database: ${error?.toString()}`);
       return 0;
     }
   }
@@ -175,7 +175,7 @@ export class SessionRestorationService {
       // For now, return 0 as it's not the primary restoration method
       return 0;
     } catch (error) {
-      this.logger.error('Failed to restore from provider files:', error);
+      this.logger.error(`Failed to restore from provider files: ${error?.toString()}`);
       return 0;
     }
   }
@@ -203,7 +203,7 @@ export class SessionRestorationService {
       await this.cache.set(`restored:${instanceData.instanceName}`, 'true', 300);
 
     } catch (error) {
-      this.logger.error(`Failed to restore instance ${instanceData.instanceName}:`, error);
+      this.logger.error(`Failed to restore instance ${instanceData.instanceName}: ${error?.toString()}`);
       throw error;
     }
   }
@@ -225,7 +225,7 @@ export class SessionRestorationService {
       }
 
     } catch (error) {
-      this.logger.error('Failed to verify restored connections:', error);
+      this.logger.error(`Failed to verify restored connections: ${error?.toString()}`);
     }
   }
 
@@ -256,7 +256,7 @@ export class SessionRestorationService {
       await this.cache.delete(`restored:${instanceName}`);
 
     } catch (error) {
-      this.logger.error(`Failed to verify connection for ${instanceName}:`, error);
+      this.logger.error(`Failed to verify connection for ${instanceName}: ${error?.toString()}`);
     }
   }
 
@@ -269,7 +269,7 @@ export class SessionRestorationService {
       }
 
     } catch (error) {
-      this.logger.error(`Failed to reconnect instance ${instanceName}:`, error);
+      this.logger.error(`Failed to reconnect instance ${instanceName}: ${error?.toString()}`);
     }
   }
 
@@ -298,7 +298,7 @@ export class SessionRestorationService {
       }
 
     } catch (error) {
-      this.logger.error(`Failed to persist instance state for ${instanceName}:`, error);
+      this.logger.error(`Failed to persist instance state for ${instanceName}: ${error?.toString()}`);
     }
   }
 
@@ -317,7 +317,7 @@ export class SessionRestorationService {
       await this.cache.delete(`connecting_time:${instanceName}`);
 
     } catch (error) {
-      this.logger.error(`Failed to remove instance state for ${instanceName}:`, error);
+      this.logger.error(`Failed to remove instance state for ${instanceName}: ${error?.toString()}`);
     }
   }
 }
