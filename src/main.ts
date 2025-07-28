@@ -5,7 +5,8 @@ import '@utils/instrumentSentry';
 import { ProviderFiles } from '@api/provider/sessions';
 import { PrismaRepository } from '@api/repository/repository.service';
 import { HttpStatus, router } from '@api/routes/index.router';
-import { eventManager, waMonitor } from '@api/server.module';
+import { eventManager, waMonitor, sessionRestorationService } from '@api/server.module';
+import { ConfigValidationService } from '@api/services/config-validation.service';
 import { Auth, configService, Cors, HttpServer, ProviderSession, Webhook } from '@config/env.config';
 import { onUnexpectedError } from '@config/error.config';
 import { Logger } from '@config/logger.config';
@@ -18,13 +19,31 @@ import cors from 'cors';
 import express, { json, NextFunction, Request, Response, urlencoded } from 'express';
 import { join } from 'path';
 
-function initWA() {
-  waMonitor.loadInstance();
+async function initWA() {
+  try {
+    // First try enhanced session restoration
+    await sessionRestorationService.restoreAllSessions();
+    
+    // Fallback to original method if no sessions were restored
+    const instances = Object.keys(waMonitor.waInstances);
+    if (instances.length === 0) {
+      waMonitor.loadInstance();
+    }
+  } catch (error) {
+    const logger = new Logger('WA_INIT');
+    logger.error('Failed to initialize WhatsApp instances:', error);
+    // Fallback to original method
+    waMonitor.loadInstance();
+  }
 }
 
 async function bootstrap() {
   const logger = new Logger('SERVER');
   const app = express();
+
+  // Validate configuration for connection management
+  const configValidation = new ConfigValidationService(configService);
+  configValidation.validateConnectionConfig();
 
   let providerFiles: ProviderFiles = null;
   if (configService.get<ProviderSession>('PROVIDER').ENABLED) {
