@@ -31,7 +31,7 @@ async function initWA() {
     }
   } catch (error) {
     const logger = new Logger('WA_INIT');
-    logger.error('Failed to initialize WhatsApp instances:', error);
+    logger.error(`Failed to initialize WhatsApp instances: ${error?.toString()}`);
     // Fallback to original method
     waMonitor.loadInstance();
   }

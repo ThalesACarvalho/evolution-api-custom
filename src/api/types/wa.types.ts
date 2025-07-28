@@ -59,6 +59,7 @@ export declare namespace wa {
     number?: string;
     integration?: string;
     businessId?: string;
+    connectingStartTime?: number;
   };
 
   export type LocalChatwoot = {

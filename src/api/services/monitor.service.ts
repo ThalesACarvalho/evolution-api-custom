@@ -229,7 +229,7 @@ export class WAMonitoringService {
       
       this.logger.info('Instance loading completed');
     } catch (error) {
-      this.logger.error('Instance loading failed:', error);
+      this.logger.error(`Instance loading failed: ${error?.toString()}`);
       throw error;
     }
   }
