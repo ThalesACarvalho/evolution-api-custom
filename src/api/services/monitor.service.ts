@@ -45,7 +45,18 @@ export class WAMonitoringService {
       setTimeout(
         async () => {
           if (this.waInstances[instance]?.connectionStatus?.state !== 'open') {
+            // Check if the instance is still trying to connect
             if (this.waInstances[instance]?.connectionStatus?.state === 'connecting') {
+              const connectingDuration = Date.now() - (this.waInstances[instance]?.connectingStartTime || 0);
+              
+              // Allow more time for connection if it's still within reasonable limits
+              if (connectingDuration < 300000) { // 5 minutes
+                this.logger.info(`Instance ${instance} still connecting, extending timeout`);
+                this.delInstanceTime(instance); // Reschedule
+                return;
+              }
+              
+              // Force close if taking too long
               if ((await this.waInstances[instance].integration) === Integration.WHATSAPP_BAILEYS) {
                 await this.waInstances[instance]?.client?.logout('Log out instance: ' + instance);
                 this.waInstances[instance]?.client?.ws?.close();
@@ -53,6 +64,7 @@ export class WAMonitoringService {
               }
               this.eventEmitter.emit('remove.instance', instance, 'inner');
             } else {
+              // Instance is closed, remove it
               this.eventEmitter.emit('remove.instance', instance, 'inner');
             }
           }
@@ -205,6 +217,8 @@ export class WAMonitoringService {
 
   public async loadInstance() {
     try {
+      this.logger.info('Starting instance loading process with enhanced session restoration');
+      
       if (this.providerSession?.ENABLED) {
         await this.loadInstancesFromProvider();
       } else if (this.db.SAVE_DATA.INSTANCE) {
@@ -212,8 +226,11 @@ export class WAMonitoringService {
       } else if (this.redis.REDIS.ENABLED && this.redis.REDIS.SAVE_INSTANCES) {
         await this.loadInstancesFromRedis();
       }
+      
+      this.logger.info('Instance loading completed');
     } catch (error) {
-      this.logger.error(error);
+      this.logger.error('Instance loading failed:', error);
+      throw error;
     }
   }
 

@@ -467,10 +467,16 @@ export class BaileysStartupService extends ChannelStartupService {
         profilePictureUrl: this.instance.profilePictureUrl,
         ...this.stateConnection,
       });
+      
+      // Notify connection health service about successful connection
+      this.eventEmitter.emit('instance.connected', this.instance.name);
     }
 
     if (connection === 'connecting') {
       this.sendDataWebhook(Events.CONNECTION_UPDATE, { instance: this.instance.name, ...this.stateConnection });
+      
+      // Notify connection health service about connecting state
+      this.eventEmitter.emit('instance.connecting', this.instance.name);
     }
   }
 
@@ -680,6 +686,13 @@ export class BaileysStartupService extends ChannelStartupService {
 
   public async connectToWhatsapp(number?: string): Promise<WASocket> {
     try {
+      this.logger.info(`Initiating WhatsApp connection for instance: ${this.instance.name}`);
+      
+      // Track connection start time for timeout detection
+      if (this.instance) {
+        this.instance.connectingStartTime = Date.now();
+      }
+      
       this.loadChatwoot();
       this.loadSettings();
       this.loadWebhook();
@@ -687,7 +700,7 @@ export class BaileysStartupService extends ChannelStartupService {
 
       return await this.createClient(number);
     } catch (error) {
-      this.logger.error(error);
+      this.logger.error(`Failed to connect WhatsApp for instance ${this.instance.name}:`, error);
       throw new InternalServerErrorException(error?.toString());
     }
   }

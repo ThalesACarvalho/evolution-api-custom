@@ -44,6 +44,9 @@ import { WAMonitoringService } from './services/monitor.service';
 import { ProxyService } from './services/proxy.service';
 import { SettingsService } from './services/settings.service';
 import { TemplateService } from './services/template.service';
+import { ConnectionHealthService } from './services/connection-health.service';
+import { SessionRestorationService } from './services/session-restoration.service';
+import { GracefulShutdownService } from './services/graceful-shutdown.service';
 
 const logger = new Logger('WA MODULE');
 
@@ -71,6 +74,34 @@ export const waMonitor = new WAMonitoringService(
   chatwootCache,
   baileysCache,
 );
+
+// Initialize enhanced connection management services
+export const sessionRestorationService = new SessionRestorationService(
+  waMonitor,
+  cache,
+  prismaRepository,
+  configService,
+);
+
+export const connectionHealthService = new ConnectionHealthService(
+  waMonitor,
+  cache,
+);
+
+export const gracefulShutdownService = new GracefulShutdownService(
+  waMonitor,
+  sessionRestorationService,
+  connectionHealthService,
+);
+
+// Set up event listeners for connection health monitoring
+eventEmitter.on('instance.connecting', async (instanceName: string) => {
+  await connectionHealthService.onInstanceConnecting(instanceName);
+});
+
+eventEmitter.on('instance.connected', async (instanceName: string) => {
+  await connectionHealthService.onInstanceConnected(instanceName);
+});
 
 const s3Service = new S3Service(prismaRepository);
 export const s3Controller = new S3Controller(s3Service);
