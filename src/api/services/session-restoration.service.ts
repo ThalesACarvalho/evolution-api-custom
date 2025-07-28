@@ -127,7 +127,9 @@ export class SessionRestorationService {
             webhook: instance.Webhook ? {
               enabled: true,
               url: instance.Webhook.url,
-              events: Array.isArray(instance.Webhook.events) ? instance.Webhook.events : [],
+              events: Array.isArray(instance.Webhook.events) 
+                ? instance.Webhook.events.filter((event): event is string => typeof event === 'string')
+                : [],
               byEvents: instance.Webhook.webhookByEvents,
               base64: instance.Webhook.webhookBase64,
             } : undefined,
