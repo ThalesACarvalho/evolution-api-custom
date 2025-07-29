@@ -21,18 +21,25 @@ import { join } from 'path';
 
 async function initWA() {
   try {
+    const logger = new Logger('WA_INIT');
+    logger.info('Starting WhatsApp initialization with enhanced session restoration');
+    
     // First try enhanced session restoration
-    await sessionRestorationService.restoreAllSessions();
+    const restoredCount = await sessionRestorationService.restoreAllSessions();
     
     // Fallback to original method if no sessions were restored
     const instances = Object.keys(waMonitor.waInstances);
     if (instances.length === 0) {
+      logger.info('No sessions restored, falling back to original loadInstance method');
       waMonitor.loadInstance();
+    } else {
+      logger.info(`Successfully restored ${restoredCount} sessions. Active instances: ${instances.join(', ')}`);
     }
   } catch (error) {
     const logger = new Logger('WA_INIT');
     logger.error(`Failed to initialize WhatsApp instances: ${error?.toString()}`);
     // Fallback to original method
+    logger.info('Falling back to original loadInstance method');
     waMonitor.loadInstance();
   }
 }

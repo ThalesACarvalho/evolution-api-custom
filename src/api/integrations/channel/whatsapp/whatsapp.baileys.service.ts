@@ -285,7 +285,32 @@ export class BaileysStartupService extends ChannelStartupService {
     };
   }
 
+  /**
+   * Reset QR code state to ensure clean initialization
+   */
+  private resetQrCodeState(): void {
+    this.instance.qrcode = { 
+      count: 0, 
+      code: null, 
+      base64: null, 
+      pairingCode: null 
+    };
+    this.logger.info(`QR code state reset for instance ${this.instance.name}`);
+  }
+
+  /**
+   * Ensure QR code is properly initialized before connection
+   */
+  private ensureQrCodeInitialized(): void {
+    if (!this.instance.qrcode) {
+      this.resetQrCodeState();
+    }
+  }
+
   private async connectionUpdate({ qr, connection, lastDisconnect }: Partial<ConnectionState>) {
+    // Ensure QR code is properly initialized
+    this.ensureQrCodeInitialized();
+    
     if (qr) {
       if (this.instance.qrcode.count === this.configService.get<QrCode>('QRCODE').LIMIT) {
         this.sendDataWebhook(Events.QRCODE_UPDATED, {
@@ -336,6 +361,36 @@ export class BaileysStartupService extends ChannelStartupService {
       qrcode.toDataURL(qr, optsQrcode, (error, base64) => {
         if (error) {
           this.logger.error('Qrcode generate failed:' + error.toString());
+          
+          // Try to emit QR code event even if base64 generation fails
+          this.instance.qrcode.code = qr;
+          this.instance.qrcode.base64 = null;
+          
+          this.sendDataWebhook(Events.QRCODE_UPDATED, {
+            qrcode: { 
+              instance: this.instance.name, 
+              pairingCode: this.instance.qrcode.pairingCode, 
+              code: qr, 
+              base64: null,
+              error: 'Failed to generate base64 QR code'
+            },
+          });
+
+          if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
+            this.chatwootService.eventWhatsapp(
+              Events.QRCODE_UPDATED,
+              { instanceName: this.instance.name, instanceId: this.instanceId },
+              {
+                qrcode: { 
+                  instance: this.instance.name, 
+                  pairingCode: this.instance.qrcode.pairingCode, 
+                  code: qr, 
+                  base64: null,
+                  error: 'Failed to generate base64 QR code'
+                },
+              },
+            );
+          }
           return;
         }
 
@@ -355,6 +410,8 @@ export class BaileysStartupService extends ChannelStartupService {
             },
           );
         }
+        
+        this.logger.info(`QR code generated successfully for instance ${this.instance.name}, count: ${this.instance.qrcode.count}`);
       });
 
       qrcodeTerminal.generate(qr, { small: true }, (qrcode) =>
@@ -450,6 +507,29 @@ export class BaileysStartupService extends ChannelStartupService {
           connectionStatus: 'open',
         },
       });
+
+      // Persist instance state to Redis cache for session restoration
+      try {
+        const instanceData = {
+          instanceId: this.instanceId,
+          instanceName: this.instance.name,
+          integration: this.instance.integration,
+          token: this.instance.token,
+          number: this.instance.number,
+          businessId: this.instance.businessId,
+          connectionStatus: 'open',
+          ownerJid: this.instance.wuid,
+          profileName: await this.getProfileName(),
+          profilePicUrl: this.instance.profilePictureUrl,
+        };
+        
+        // Emit event for session persistence
+        this.eventEmitter.emit('instance.state.persist', this.instance.name, instanceData);
+        
+        this.logger.info(`Instance state persisted for ${this.instance.name}`);
+      } catch (error) {
+        this.logger.error(`Failed to persist instance state for ${this.instance.name}: ${error?.toString()}`);
+      }
 
       if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
         this.chatwootService.eventWhatsapp(
@@ -687,6 +767,9 @@ export class BaileysStartupService extends ChannelStartupService {
   public async connectToWhatsapp(number?: string): Promise<WASocket> {
     try {
       this.logger.info(`Initiating WhatsApp connection for instance: ${this.instance.name}`);
+      
+      // Reset QR code state for clean connection
+      this.resetQrCodeState();
       
       // Track connection start time for timeout detection
       if (this.instance) {

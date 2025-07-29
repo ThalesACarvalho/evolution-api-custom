@@ -61,23 +61,50 @@ export class SessionRestorationService {
     try {
       this.logger.info('Attempting to restore sessions from Redis cache');
       
-      const keys = await this.cache.keys('instance:*');
+      // Use the correct key pattern - the cache service automatically builds the full key
+      const keys = await this.cache.keys('');
       if (!keys || keys.length === 0) {
-        this.logger.info('No instances found in Redis cache');
+        this.logger.info('No instance keys found in Redis cache');
         return 0;
       }
 
+      this.logger.info(`Found ${keys.length} keys in Redis cache, filtering for instances`);
+
       let restored = 0;
-      for (const key of keys) {
+      for (const fullKey of keys) {
         try {
-          const instanceData = await this.cache.get(key);
-          if (instanceData) {
-            const parsedData = typeof instanceData === 'string' ? JSON.parse(instanceData) : instanceData;
-            await this.restoreInstance(parsedData);
-            restored++;
+          // Extract the instance key from the full Redis key
+          // Format: evolution_cache:instance:instanceId
+          const keyParts = fullKey.split(':');
+          if (keyParts.length >= 3 && keyParts[1] === 'instance') {
+            const instanceKey = keyParts.slice(2).join(':'); // Handle cases where instanceId contains ':'
+            
+            // Skip keys that are not actual instance data (like connecting_time)
+            if (instanceKey.includes('connecting_time') || instanceKey.includes('restored')) {
+              continue;
+            }
+            
+            // Try to get instance data from cache using just the instanceKey
+            this.logger.info(`Attempting to restore instance from key: ${instanceKey}`);
+            
+            const instanceData = await this.cache.get(instanceKey);
+            if (instanceData) {
+              const parsedData = typeof instanceData === 'string' ? JSON.parse(instanceData) : instanceData;
+              
+              // Validate that this looks like instance data
+              if (parsedData && (parsedData.instanceName || parsedData.instanceId)) {
+                await this.restoreInstance(parsedData);
+                restored++;
+                this.logger.info(`Successfully restored instance: ${parsedData.instanceName || instanceKey}`);
+              } else {
+                this.logger.warn(`Invalid instance data for key: ${instanceKey}`);
+              }
+            } else {
+              this.logger.warn(`No data found for instance key: ${instanceKey}`);
+            }
           }
         } catch (error) {
-          this.logger.error(`Failed to restore instance from Redis key ${key}: ${error?.toString()}`);
+          this.logger.error(`Failed to restore instance from Redis key ${fullKey}: ${error?.toString()}`);
         }
       }
 
@@ -97,7 +124,7 @@ export class SessionRestorationService {
       const instances = await this.prismaRepository.instance.findMany({
         where: { 
           clientName: clientName,
-          // Only restore instances that were previously connected
+          // Only restore instances that were previously connected or trying to connect
           connectionStatus: { in: ['open', 'connecting'] }
         },
         include: {
@@ -109,9 +136,11 @@ export class SessionRestorationService {
       });
 
       if (instances.length === 0) {
-        this.logger.info('No instances found in database for restoration');
+        this.logger.info('No connected instances found in database for restoration');
         return 0;
       }
+
+      this.logger.info(`Found ${instances.length} connected instances in database to restore`);
 
       let restored = 0;
       for (const instance of instances) {
@@ -197,12 +226,19 @@ export class SessionRestorationService {
 
       this.logger.info(`Restoring instance: ${instanceData.instanceName}`);
 
-      // Use the existing setInstance method from WAMonitoringService
-      // We need to access the private method, so we'll call the public loadInstance instead
-      // and trust that the database/cache data is consistent
+      // Use the setInstance method from WAMonitoringService to properly restore the instance
+      await this.waMonitor.setInstance(instanceData);
 
       // Mark the instance as restored in cache for monitoring
       await this.cache.set(`restored:${instanceData.instanceName}`, 'true', 300);
+
+      this.logger.info(`Successfully restored and connected instance: ${instanceData.instanceName}`);
+
+    } catch (error) {
+      this.logger.error(`Failed to restore instance ${instanceData.instanceName}: ${error?.toString()}`);
+      throw error;
+    }
+  }
 
     } catch (error) {
       this.logger.error(`Failed to restore instance ${instanceData.instanceName}: ${error?.toString()}`);
@@ -243,6 +279,14 @@ export class SessionRestorationService {
       
       if (connectionStatus?.state === 'open') {
         this.logger.info(`Instance ${instanceName} successfully restored and connected`);
+        
+        // Verify that the instance is actually functional by checking if it has required properties
+        if (instance.client && instance.instanceId) {
+          this.logger.info(`Instance ${instanceName} verification passed - client and instanceId present`);
+        } else {
+          this.logger.warn(`Instance ${instanceName} missing critical properties, may need reconnection`);
+          await this.attemptReconnection(instanceName, instance);
+        }
       } else if (connectionStatus?.state === 'connecting') {
         this.logger.info(`Instance ${instanceName} is still connecting after restoration`);
         // Set up a timeout to check again later
@@ -250,7 +294,7 @@ export class SessionRestorationService {
           await this.verifyInstanceConnection(instanceName);
         }, 30000); // Check again in 30 seconds
       } else {
-        this.logger.warn(`Instance ${instanceName} failed to connect after restoration, attempting reconnect`);
+        this.logger.warn(`Instance ${instanceName} failed to connect after restoration (state: ${connectionStatus?.state}), attempting reconnect`);
         await this.attemptReconnection(instanceName, instance);
       }
 
@@ -282,11 +326,15 @@ export class SessionRestorationService {
     try {
       // Save to Redis if enabled
       if (this.redis.REDIS.ENABLED && this.redis.REDIS.SAVE_INSTANCES) {
-        await this.cache.set(`instance:${instanceData.instanceId}:${instanceName}`, JSON.stringify(instanceData), 0); // No TTL
+        const cacheKey = instanceData.instanceId || instanceName;
+        // Set TTL to 0 (no expiration) for instance session data to prevent premature expiration
+        // This ensures sessions are not lost due to TTL timeout
+        await this.cache.set(cacheKey, instanceData, 0); // No TTL
+        this.logger.info(`Saved instance state to Redis: ${instanceName} (${cacheKey}) - no TTL expiration`);
       }
 
       // Update database status if enabled
-      if (this.db.SAVE_DATA.INSTANCE) {
+      if (this.db.SAVE_DATA.INSTANCE && instanceData.instanceId) {
         await this.prismaRepository.instance.update({
           where: { id: instanceData.instanceId },
           data: {
@@ -297,6 +345,7 @@ export class SessionRestorationService {
             number: instanceData.number,
           },
         });
+        this.logger.info(`Updated instance state in database: ${instanceName}`);
       }
 
     } catch (error) {
@@ -311,7 +360,8 @@ export class SessionRestorationService {
     try {
       // Remove from Redis if enabled
       if (this.redis.REDIS.ENABLED && this.redis.REDIS.SAVE_INSTANCES && instanceId) {
-        await this.cache.delete(`instance:${instanceId}:${instanceName}`);
+        await this.cache.delete(instanceId);
+        this.logger.info(`Removed instance state from Redis: ${instanceName} (${instanceId})`);
       }
 
       // Clear any restoration markers
@@ -320,6 +370,66 @@ export class SessionRestorationService {
 
     } catch (error) {
       this.logger.error(`Failed to remove instance state for ${instanceName}: ${error?.toString()}`);
+    }
+  }
+
+  /**
+   * Validate session health and check for potential issues
+   */
+  public async validateSessionHealth(): Promise<void> {
+    try {
+      this.logger.info('Starting session health validation');
+      
+      const instances = Object.keys(this.waMonitor.waInstances);
+      let healthyCount = 0;
+      let unhealthyCount = 0;
+      
+      for (const instanceName of instances) {
+        const instance = this.waMonitor.waInstances[instanceName];
+        
+        if (!instance) {
+          this.logger.warn(`Instance ${instanceName} exists in waInstances but is null/undefined`);
+          unhealthyCount++;
+          continue;
+        }
+        
+        const connectionState = instance.connectionStatus?.state;
+        
+        if (connectionState === 'open') {
+          // Check if the instance has required properties for a healthy session
+          if (instance.client && instance.instanceId && instance.instance?.wuid) {
+            healthyCount++;
+            
+            // Persist healthy session state to ensure it's not lost
+            const instanceData = {
+              instanceId: instance.instanceId,
+              instanceName: instanceName,
+              integration: instance.integration,
+              token: instance.token,
+              number: instance.number,
+              businessId: instance.businessId,
+              connectionStatus: 'open',
+              ownerJid: instance.instance.wuid,
+              profileName: instance.instance.profileName,
+              profilePicUrl: instance.instance.profilePictureUrl,
+            };
+            
+            await this.persistInstanceState(instanceName, instanceData);
+            
+          } else {
+            this.logger.warn(`Instance ${instanceName} appears connected but missing critical properties`);
+            unhealthyCount++;
+          }
+        } else {
+          this.logger.warn(`Instance ${instanceName} has unhealthy connection state: ${connectionState}`);
+          unhealthyCount++;
+        }
+      }
+      
+      this.logger.info(`Session health check completed: ${healthyCount} healthy, ${unhealthyCount} unhealthy instances`);
+      
+    } catch (error) {
+      this.logger.error(`Session health validation failed: ${error?.toString()}`);
     }
   }
 }
