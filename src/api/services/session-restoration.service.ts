@@ -240,12 +240,6 @@ export class SessionRestorationService {
     }
   }
 
-    } catch (error) {
-      this.logger.error(`Failed to restore instance ${instanceData.instanceName}: ${error?.toString()}`);
-      throw error;
-    }
-  }
-
   private async verifyRestoredConnections(): Promise<void> {
     try {
       this.logger.info('Verifying restored connections');
