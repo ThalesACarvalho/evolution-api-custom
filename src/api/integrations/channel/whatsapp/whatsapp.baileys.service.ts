@@ -293,7 +293,8 @@ export class BaileysStartupService extends ChannelStartupService {
       count: 0, 
       code: null, 
       base64: null, 
-      pairingCode: null 
+      pairingCode: null,
+      lastGenerated: null
     };
     this.logger.info(`QR code state reset for instance ${this.instance.name}`);
   }
@@ -312,7 +313,20 @@ export class BaileysStartupService extends ChannelStartupService {
     this.ensureQrCodeInitialized();
     
     if (qr) {
+      // Implement QR code spam prevention
+      const now = Date.now();
+      const lastQrTime = this.instance.qrcode.lastGenerated || 0;
+      const timeSinceLastQr = now - lastQrTime;
+      const minQrInterval = 60000; // 1 minute minimum between QR generations
+      
+      if (timeSinceLastQr < minQrInterval && this.instance.qrcode.count > 0) {
+        this.logger.warn(`QR code generation too frequent for ${this.instance.name}, last generated ${timeSinceLastQr}ms ago. Minimum interval: ${minQrInterval}ms`);
+        return; // Skip QR generation to prevent spam
+      }
+      
       if (this.instance.qrcode.count === this.configService.get<QrCode>('QRCODE').LIMIT) {
+        this.logger.warn(`QR code limit reached for instance ${this.instance.name}`);
+        
         this.sendDataWebhook(Events.QRCODE_UPDATED, {
           message: 'QR code limit reached, please login again',
           statusCode: DisconnectReason.badSession,
@@ -341,6 +355,9 @@ export class BaileysStartupService extends ChannelStartupService {
       }
 
       this.instance.qrcode.count++;
+      this.instance.qrcode.lastGenerated = now;
+      
+      this.logger.info(`Generating QR code #${this.instance.qrcode.count} for instance ${this.instance.name}`);
 
       const color = this.configService.get<QrCode>('QRCODE').COLOR;
 
@@ -592,20 +609,50 @@ export class BaileysStartupService extends ChannelStartupService {
   private async defineAuthState() {
     const db = this.configService.get<Database>('DATABASE');
     const cache = this.configService.get<CacheConf>('CACHE');
-
     const provider = this.configService.get<ProviderSession>('PROVIDER');
 
-    if (provider?.ENABLED) {
-      return await this.authStateProvider.authStateProvider(this.instance.id);
-    }
+    this.logger.info(`Defining auth state for instance ${this.instance.name}`);
 
-    if (cache?.REDIS.ENABLED && cache?.REDIS.SAVE_INSTANCES) {
-      this.logger.info('Redis enabled');
-      return await useMultiFileAuthStateRedisDb(this.instance.id, this.cache);
-    }
+    try {
+      if (provider?.ENABLED) {
+        this.logger.info(`Using provider auth state for instance ${this.instance.name}`);
+        return await this.authStateProvider.authStateProvider(this.instance.id);
+      }
 
-    if (db.SAVE_DATA.INSTANCE) {
-      return await useMultiFileAuthStatePrisma(this.instance.id, this.cache);
+      if (cache?.REDIS.ENABLED && cache?.REDIS.SAVE_INSTANCES) {
+        this.logger.info(`Attempting Redis auth state for instance ${this.instance.name}`);
+        try {
+          const authState = await useMultiFileAuthStateRedisDb(this.instance.id, this.cache);
+          this.logger.info(`Successfully loaded Redis auth state for instance ${this.instance.name}`);
+          return authState;
+        } catch (redisError) {
+          this.logger.error(`Redis auth state failed for instance ${this.instance.name}: ${redisError?.toString()}`);
+          
+          // If Redis fails, fall back to database if available
+          if (db.SAVE_DATA.INSTANCE) {
+            this.logger.warn(`Falling back to database auth state for instance ${this.instance.name}`);
+            return await useMultiFileAuthStatePrisma(this.instance.id, this.cache);
+          }
+          
+          // If no database fallback, throw the error to trigger fresh auth
+          throw redisError;
+        }
+      }
+
+      if (db.SAVE_DATA.INSTANCE) {
+        this.logger.info(`Using database auth state for instance ${this.instance.name}`);
+        return await useMultiFileAuthStatePrisma(this.instance.id, this.cache);
+      }
+
+      this.logger.warn(`No persistent auth state configured for instance ${this.instance.name}, using in-memory state`);
+      return null;
+
+    } catch (error) {
+      this.logger.error(`Failed to define auth state for instance ${this.instance.name}: ${error?.toString()}`);
+      
+      // Return null to trigger fresh authentication rather than crashing
+      this.logger.warn(`Falling back to fresh authentication for instance ${this.instance.name}`);
+      return null;
     }
   }
 

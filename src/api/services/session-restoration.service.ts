@@ -61,6 +61,14 @@ export class SessionRestorationService {
     try {
       this.logger.info('Attempting to restore sessions from Redis cache');
       
+      // First, attempt to clean up any corrupted keys
+      if (this.cache?.cleanupCorruptedKeys) {
+        const cleanedCount = await this.cache.cleanupCorruptedKeys();
+        if (cleanedCount > 0) {
+          this.logger.info(`Cleaned up ${cleanedCount} corrupted Redis keys before restoration`);
+        }
+      }
+      
       // Use the correct key pattern - the cache service automatically builds the full key
       const keys = await this.cache.keys('');
       if (!keys || keys.length === 0) {
@@ -79,28 +87,45 @@ export class SessionRestorationService {
           if (keyParts.length >= 3 && keyParts[1] === 'instance') {
             const instanceKey = keyParts.slice(2).join(':'); // Handle cases where instanceId contains ':'
             
-            // Skip keys that are not actual instance data (like connecting_time)
-            if (instanceKey.includes('connecting_time') || instanceKey.includes('restored')) {
+            // Skip keys that are not actual instance data (like connecting_time, restored)
+            if (instanceKey.includes('connecting_time') || 
+                instanceKey.includes('restored') || 
+                instanceKey.includes('creds') ||
+                instanceKey.includes('-')) {
               continue;
             }
             
             // Try to get instance data from cache using just the instanceKey
             this.logger.info(`Attempting to restore instance from key: ${instanceKey}`);
             
-            const instanceData = await this.cache.get(instanceKey);
-            if (instanceData) {
-              const parsedData = typeof instanceData === 'string' ? JSON.parse(instanceData) : instanceData;
-              
-              // Validate that this looks like instance data
-              if (parsedData && (parsedData.instanceName || parsedData.instanceId)) {
-                await this.restoreInstance(parsedData);
-                restored++;
-                this.logger.info(`Successfully restored instance: ${parsedData.instanceName || instanceKey}`);
+            try {
+              const instanceData = await this.cache.get(instanceKey);
+              if (instanceData) {
+                const parsedData = typeof instanceData === 'string' ? JSON.parse(instanceData) : instanceData;
+                
+                // Validate that this looks like instance data
+                if (parsedData && (parsedData.instanceName || parsedData.instanceId)) {
+                  await this.restoreInstance(parsedData);
+                  restored++;
+                  this.logger.info(`Successfully restored instance: ${parsedData.instanceName || instanceKey}`);
+                } else {
+                  this.logger.warn(`Invalid instance data for key: ${instanceKey}`);
+                }
               } else {
-                this.logger.warn(`Invalid instance data for key: ${instanceKey}`);
+                this.logger.warn(`No data found for instance key: ${instanceKey}`);
               }
-            } else {
-              this.logger.warn(`No data found for instance key: ${instanceKey}`);
+            } catch (redisError) {
+              this.logger.warn(`Redis error for key ${instanceKey}, attempting database fallback: ${redisError?.toString()}`);
+              
+              // If Redis fails for this key, try to restore from database as fallback
+              if (this.db.SAVE_DATA.INSTANCE) {
+                const dbInstance = await this.findInstanceInDatabase(instanceKey);
+                if (dbInstance) {
+                  await this.restoreInstance(dbInstance);
+                  restored++;
+                  this.logger.info(`Successfully restored instance from database fallback: ${instanceKey}`);
+                }
+              }
             }
           }
         } catch (error) {
@@ -113,6 +138,14 @@ export class SessionRestorationService {
 
     } catch (error) {
       this.logger.error(`Failed to restore from Redis cache: ${error?.toString()}`);
+      
+      // If Redis completely fails, fall back to database restoration
+      if (this.db.SAVE_DATA.INSTANCE) {
+        this.logger.info('Redis cache failed, attempting fallback to database restoration');
+        const clientName = this.configService.get<Database>('DATABASE').CONNECTION.CLIENT_NAME;
+        return await this.restoreFromDatabase(clientName);
+      }
+      
       return 0;
     }
   }
@@ -424,6 +457,72 @@ export class SessionRestorationService {
       
     } catch (error) {
       this.logger.error(`Session health validation failed: ${error?.toString()}`);
+    }
+  }
+
+  /**
+   * Find a specific instance in the database by instance ID or name
+   */
+  private async findInstanceInDatabase(instanceKey: string): Promise<InstanceDto | null> {
+    try {
+      const clientName = this.configService.get<Database>('DATABASE').CONNECTION.CLIENT_NAME;
+      
+      // Try to find by ID first, then by name
+      const instance = await this.prismaRepository.instance.findFirst({
+        where: {
+          OR: [
+            { id: instanceKey, clientName },
+            { name: instanceKey, clientName }
+          ],
+          connectionStatus: { in: ['open', 'connecting'] }
+        },
+        include: {
+          Webhook: true,
+          Chatwoot: true,
+          Proxy: true,
+          Setting: true,
+        },
+      });
+
+      if (!instance) {
+        return null;
+      }
+
+      return {
+        instanceId: instance.id,
+        instanceName: instance.name,
+        integration: instance.integration,
+        token: instance.token,
+        number: instance.number,
+        businessId: instance.businessId,
+        webhook: instance.Webhook ? {
+          enabled: true,
+          url: instance.Webhook.url,
+          events: Array.isArray(instance.Webhook.events) 
+            ? instance.Webhook.events.filter((event): event is string => typeof event === 'string')
+            : [],
+          byEvents: instance.Webhook.webhookByEvents,
+          base64: instance.Webhook.webhookBase64,
+        } : undefined,
+        chatwootAccountId: instance.Chatwoot?.accountId,
+        chatwootToken: instance.Chatwoot?.token,
+        chatwootUrl: instance.Chatwoot?.url,
+        chatwootNameInbox: instance.Chatwoot?.nameInbox,
+        proxyHost: instance.Proxy?.host,
+        proxyPort: instance.Proxy?.port,
+        proxyProtocol: instance.Proxy?.protocol,
+        proxyUsername: instance.Proxy?.username,
+        proxyPassword: instance.Proxy?.password,
+        rejectCall: instance.Setting?.rejectCall,
+        msgCall: instance.Setting?.msgCall,
+        groupsIgnore: instance.Setting?.groupsIgnore,
+        alwaysOnline: instance.Setting?.alwaysOnline,
+        readMessages: instance.Setting?.readMessages,
+        readStatus: instance.Setting?.readStatus,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to find instance ${instanceKey} in database: ${error?.toString()}`);
+      return null;
     }
   }
 }

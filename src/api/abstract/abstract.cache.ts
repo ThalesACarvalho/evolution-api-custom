@@ -16,4 +16,9 @@ export interface ICache {
   hDelete(key: string, field: string): Promise<any>;
 
   deleteAll(appendCriteria?: string): Promise<number>;
+
+  // Optional methods for enhanced Redis functionality
+  getKeyType?(key: string): Promise<string>;
+  
+  cleanupCorruptedKeys?(pattern?: string): Promise<number>;
 }
