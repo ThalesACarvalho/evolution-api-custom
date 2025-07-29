@@ -5,7 +5,7 @@ import '@utils/instrumentSentry';
 import { ProviderFiles } from '@api/provider/sessions';
 import { PrismaRepository } from '@api/repository/repository.service';
 import { HttpStatus, router } from '@api/routes/index.router';
-import { eventManager, waMonitor, sessionRestorationService } from '@api/server.module';
+import { eventManager, sessionRestorationService, waMonitor } from '@api/server.module';
 import { ConfigValidationService } from '@api/services/config-validation.service';
 import { Auth, configService, Cors, HttpServer, ProviderSession, Webhook } from '@config/env.config';
 import { onUnexpectedError } from '@config/error.config';
@@ -23,10 +23,10 @@ async function initWA() {
   try {
     const logger = new Logger('WA_INIT');
     logger.info('Starting WhatsApp initialization with enhanced session restoration');
-    
+
     // First try enhanced session restoration
     const restoredCount = await sessionRestorationService.restoreAllSessions();
-    
+
     // Fallback to original method if no sessions were restored
     const instances = Object.keys(waMonitor.waInstances);
     if (instances.length === 0) {

@@ -42,12 +42,12 @@ export class ProxyController {
       // ✅ Só rejeita se não for sucesso nem caso especial aceito
       if (!testResult.success && testResult.code !== 'error8' && testResult.code !== 'ok2') {
         throw new BadRequestException(
-          `[${testResult.code}] ${testResult.reason} (Server IP: ${testResult.serverIp}, Proxy IP: ${testResult.proxyIp})`
+          `[${testResult.code}] ${testResult.reason} (Server IP: ${testResult.serverIp}, Proxy IP: ${testResult.proxyIp})`,
         );
       }
 
       logger.log(
-        `Proxy test passed [${testResult.code}]: ${testResult.reason} (Server IP: ${testResult.serverIp}, Proxy IP: ${testResult.proxyIp})`
+        `Proxy test passed [${testResult.code}]: ${testResult.reason} (Server IP: ${testResult.serverIp}, Proxy IP: ${testResult.proxyIp})`,
       );
     }
 
@@ -101,13 +101,9 @@ export class ProxyController {
           });
           result.proxyIp = httpsResponse.data.trim();
         } catch (httpsError) {
-          if (
-            axios.isAxiosError(httpsError) &&
-            httpsError.message.toLowerCase().includes('self signed')
-          ) {
+          if (axios.isAxiosError(httpsError) && httpsError.message.toLowerCase().includes('self signed')) {
             result.code = 'error8';
-            result.reason =
-              `SSL certificate issue (self-signed or untrusted). Proxy accepted. (Server IP: ${result.serverIp}, Proxy IP: unknown)`;
+            result.reason = `SSL certificate issue (self-signed or untrusted). Proxy accepted. (Server IP: ${result.serverIp}, Proxy IP: unknown)`;
             result.success = true;
             return result;
           } else if (
@@ -116,8 +112,7 @@ export class ProxyController {
             httpsError.response?.headers['x-brd-error']?.includes('no_peer')
           ) {
             result.code = 'ok2';
-            result.reason =
-              `Proxy connected but no peers available for this city. (Server IP: ${result.serverIp}, Proxy IP: unknown)`;
+            result.reason = `Proxy connected but no peers available for this city. (Server IP: ${result.serverIp}, Proxy IP: unknown)`;
             result.success = true;
             return result;
           } else {

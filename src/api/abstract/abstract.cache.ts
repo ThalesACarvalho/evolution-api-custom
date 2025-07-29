@@ -19,6 +19,6 @@ export interface ICache {
 
   // Optional methods for enhanced Redis functionality
   getKeyType?(key: string): Promise<string>;
-  
+
   cleanupCorruptedKeys?(pattern?: string): Promise<number>;
 }

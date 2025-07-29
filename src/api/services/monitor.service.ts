@@ -49,35 +49,38 @@ export class WAMonitoringService {
             // Check if the instance is still trying to connect
             if (this.waInstances[instance]?.connectionStatus?.state === 'connecting') {
               const connectingDuration = Date.now() - (this.waInstances[instance]?.connectingStartTime || 0);
-              
+
               this.logger.info(`Instance ${instance} connecting for ${connectingDuration}ms`);
-              
+
               // Allow more time for connection if it's still within reasonable limits
-              if (connectingDuration < 300000) { // 5 minutes
+              if (connectingDuration < 300000) {
+                // 5 minutes
                 this.logger.info(`Instance ${instance} still connecting, extending timeout`);
                 this.delInstanceTime(instance); // Reschedule
                 return;
               }
-              
+
               // Check if there are Redis/Cache issues before forcing logout
               const cacheAvailable = await this.checkCacheAvailability(instance);
               if (!cacheAvailable) {
-                this.logger.warn(`Instance ${instance} connection timeout but cache unavailable, attempting recovery instead of logout`);
-                
+                this.logger.warn(
+                  `Instance ${instance} connection timeout but cache unavailable, attempting recovery instead of logout`,
+                );
+
                 // Try to recover the session instead of logging out
                 try {
                   const sessionRestoration = new SessionRestorationService(
                     this,
                     this.cache,
                     this.prismaRepository,
-                    this.configService
+                    this.configService,
                   );
-                  
+
                   // Try to restore from database as fallback
                   const restored = await sessionRestoration.restoreFromDatabase(
-                    this.configService.get<Database>('DATABASE').CONNECTION.CLIENT_NAME
+                    this.configService.get<Database>('DATABASE').CONNECTION.CLIENT_NAME,
                   );
-                  
+
                   if (restored > 0) {
                     this.logger.info(`Successfully recovered instance ${instance} from database`);
                     return;
@@ -86,12 +89,16 @@ export class WAMonitoringService {
                   this.logger.error(`Failed to recover instance ${instance}: ${error?.toString()}`);
                 }
               }
-              
+
               // Only force logout if we've exhausted recovery options
-              this.logger.warn(`Forcing logout for instance ${instance} after ${connectingDuration}ms connection timeout`);
-              
+              this.logger.warn(
+                `Forcing logout for instance ${instance} after ${connectingDuration}ms connection timeout`,
+              );
+
               if ((await this.waInstances[instance].integration) === Integration.WHATSAPP_BAILEYS) {
-                await this.waInstances[instance]?.client?.logout('Connection timeout after ' + connectingDuration + 'ms: ' + instance);
+                await this.waInstances[instance]?.client?.logout(
+                  'Connection timeout after ' + connectingDuration + 'ms: ' + instance,
+                );
                 this.waInstances[instance]?.client?.ws?.close();
                 this.waInstances[instance]?.client?.end(undefined);
               }
@@ -252,7 +259,7 @@ export class WAMonitoringService {
   public async loadInstance() {
     try {
       this.logger.info('Starting instance loading process with enhanced session restoration');
-      
+
       if (this.providerSession?.ENABLED) {
         await this.loadInstancesFromProvider();
       } else if (this.db.SAVE_DATA.INSTANCE) {
@@ -260,7 +267,7 @@ export class WAMonitoringService {
       } else if (this.redis.REDIS.ENABLED && this.redis.REDIS.SAVE_INSTANCES) {
         await this.loadInstancesFromRedis();
       }
-      
+
       this.logger.info('Instance loading completed');
     } catch (error) {
       this.logger.error(`Instance loading failed: ${error?.toString()}`);
@@ -406,7 +413,11 @@ export class WAMonitoringService {
   }
 
   private removeInstance() {
-    this.eventEmitter.on('remove.instance', async (instanceName: string) => {
+    this.eventEmitter.on('remove.instance', async (instanceName: string, reason?: string) => {
+      this.logger.warn(
+        `[REMOVE_INSTANCE_EVENT] Instance "${instanceName}" - Remove event triggered with reason: ${reason || 'unknown'}`,
+      );
+
       try {
         await this.waInstances[instanceName]?.sendDataWebhook(Events.REMOVE_INSTANCE, null);
 
@@ -417,7 +428,7 @@ export class WAMonitoringService {
         this.cleaningUp(instanceName);
         this.cleaningStoreData(instanceName);
       } finally {
-        this.logger.warn(`Instance "${instanceName}" - REMOVED`);
+        this.logger.warn(`[REMOVE_INSTANCE_COMPLETE] Instance "${instanceName}" - REMOVED`);
       }
 
       try {
@@ -426,7 +437,11 @@ export class WAMonitoringService {
         this.logger.error(error);
       }
     });
-    this.eventEmitter.on('logout.instance', async (instanceName: string) => {
+    this.eventEmitter.on('logout.instance', async (instanceName: string, reason?: string) => {
+      this.logger.warn(
+        `[LOGOUT_INSTANCE_EVENT] Instance "${instanceName}" - Logout event triggered with reason: ${reason || 'unknown'}`,
+      );
+
       try {
         await this.waInstances[instanceName]?.sendDataWebhook(Events.LOGOUT_INSTANCE, null);
 
@@ -436,13 +451,15 @@ export class WAMonitoringService {
 
         this.cleaningUp(instanceName);
       } finally {
-        this.logger.warn(`Instance "${instanceName}" - LOGOUT`);
+        this.logger.warn(`[LOGOUT_INSTANCE_COMPLETE] Instance "${instanceName}" - LOGOUT`);
       }
     });
   }
 
   private noConnection() {
     this.eventEmitter.on('no.connection', async (instanceName) => {
+      this.logger.warn(`[NO_CONNECTION_EVENT] Instance "${instanceName}" - No connection event triggered`);
+
       try {
         await this.waInstances[instanceName]?.client?.logout('Log out instance: ' + instanceName);
 
@@ -450,6 +467,8 @@ export class WAMonitoringService {
 
         this.waInstances[instanceName].instance.qrcode = { count: 0 };
         this.waInstances[instanceName].stateConnection.state = 'close';
+
+        this.logger.warn(`[NO_CONNECTION_STATE_SET] Instance "${instanceName}" - State forcibly set to 'close'`);
       } catch (error) {
         this.logger.error({
           localError: 'noConnection',
@@ -457,7 +476,7 @@ export class WAMonitoringService {
           error,
         });
       } finally {
-        this.logger.warn(`Instance "${instanceName}" - NOT CONNECTION`);
+        this.logger.warn(`[NO_CONNECTION_COMPLETE] Instance "${instanceName}" - NOT CONNECTION`);
       }
     });
   }
@@ -470,13 +489,13 @@ export class WAMonitoringService {
       if (!this.cache) {
         return false;
       }
-      
+
       // Try a simple cache operation to test availability
       const testKey = `test:${instanceName}:${Date.now()}`;
       await this.cache.set(testKey, 'test', 5); // 5 second TTL
       const result = await this.cache.get(testKey);
       await this.cache.delete(testKey);
-      
+
       return result === 'test';
     } catch (error) {
       this.logger.warn(`Cache availability check failed for ${instanceName}: ${error?.toString()}`);

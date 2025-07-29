@@ -34,24 +34,26 @@ export class SendMessageController {
    */
   private validateInstanceReady(instanceName: string): void {
     const instance = this.waMonitor.waInstances[instanceName];
-    
+
     if (!instance) {
-      throw new BadRequestException(`Instance "${instanceName}" not found. Please ensure the instance is created and connected.`);
+      throw new BadRequestException(
+        `Instance "${instanceName}" not found. Please ensure the instance is created and connected.`,
+      );
     }
-    
+
     const connectionState = instance.connectionStatus?.state;
-    
+
     if (connectionState !== 'open') {
       throw new BadRequestException(
         `Instance "${instanceName}" is not ready for message sending. ` +
-        `Current state: ${connectionState || 'unknown'}. Please wait for the instance to connect.`
+          `Current state: ${connectionState || 'unknown'}. Please wait for the instance to connect.`,
       );
     }
-    
+
     // Additional validation for critical properties
     if (!instance.client || !instance.instanceId) {
       throw new BadRequestException(
-        `Instance "${instanceName}" is missing critical components. Please reconnect the instance.`
+        `Instance "${instanceName}" is missing critical components. Please reconnect the instance.`,
       );
     }
   }
@@ -68,7 +70,7 @@ export class SendMessageController {
 
   public async sendMedia({ instanceName }: InstanceDto, data: SendMediaDto, file?: any) {
     this.validateInstanceReady(instanceName);
-    
+
     if (isBase64(data?.media) && !data?.fileName && data?.mediatype === 'document') {
       throw new BadRequestException('For base64 the file name must be informed.');
     }
@@ -81,7 +83,7 @@ export class SendMessageController {
 
   public async sendPtv({ instanceName }: InstanceDto, data: SendPtvDto, file?: any) {
     this.validateInstanceReady(instanceName);
-    
+
     if (file || isURL(data?.video) || isBase64(data?.video)) {
       return await this.waMonitor.waInstances[instanceName].ptvMessage(data, file);
     }
@@ -90,7 +92,7 @@ export class SendMessageController {
 
   public async sendSticker({ instanceName }: InstanceDto, data: SendStickerDto, file?: any) {
     this.validateInstanceReady(instanceName);
-    
+
     if (file || isURL(data.sticker) || isBase64(data.sticker)) {
       return await this.waMonitor.waInstances[instanceName].mediaSticker(data, file);
     }
@@ -99,7 +101,7 @@ export class SendMessageController {
 
   public async sendWhatsAppAudio({ instanceName }: InstanceDto, data: SendAudioDto, file?: any) {
     this.validateInstanceReady(instanceName);
-    
+
     if (file?.buffer || isURL(data.audio) || isBase64(data.audio)) {
       // Si file existe y tiene buffer, o si es una URL o Base64, continúa
       return await this.waMonitor.waInstances[instanceName].audioWhatsapp(data, file);
@@ -131,7 +133,7 @@ export class SendMessageController {
 
   public async sendReaction({ instanceName }: InstanceDto, data: SendReactionDto) {
     this.validateInstanceReady(instanceName);
-    
+
     if (!isEmoji(data.reaction)) {
       throw new BadRequestException('Reaction must be a single emoji or empty string');
     }
