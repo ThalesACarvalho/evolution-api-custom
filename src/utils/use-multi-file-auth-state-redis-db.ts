@@ -70,7 +70,7 @@ export async function useMultiFileAuthStateRedisDb(
       logger.info(`No existing auth credentials found for instance ${instanceName}, using fresh credentials`);
     }
   } catch (error) {
-    logger.error(`Failed to load auth credentials for ${instanceName}:`, error);
+    logger.error(`Failed to load auth credentials for ${instanceName}: ${error?.toString()}`);
     logger.warn(`Falling back to fresh auth credentials for ${instanceName}`);
     creds = initAuthCreds();
   }
@@ -94,7 +94,7 @@ export async function useMultiFileAuthStateRedisDb(
 
                   data[id] = value;
                 } catch (error) {
-                  logger.error(`Failed to read key data for ${type}-${id}:`, error);
+                  logger.error(`Failed to read key data for ${type}-${id}: ${error?.toString()}`);
                   // Continue with null value rather than failing completely
                   data[id] = null;
                 }
@@ -103,7 +103,7 @@ export async function useMultiFileAuthStateRedisDb(
 
             return data;
           } catch (error) {
-            logger.error(`Failed to get keys for type ${type}:`, error);
+            logger.error(`Failed to get keys for type ${type}: ${error?.toString()}`);
             // Return empty object to allow auth to continue with fresh state
             return {};
           }
@@ -122,7 +122,7 @@ export async function useMultiFileAuthStateRedisDb(
             await Promise.all(tasks);
             logger.verbose(`Successfully saved auth keys for instance ${instanceName}`);
           } catch (error) {
-            logger.error(`Failed to set auth keys for instance ${instanceName}:`, error);
+            logger.error(`Failed to set auth keys for instance ${instanceName}: ${error?.toString()}`);
             // Don't throw here - allow the auth process to continue even if Redis save fails
             logger.warn(`Auth key saving failed for ${instanceName}, session may not persist across restarts`);
           }
@@ -135,7 +135,7 @@ export async function useMultiFileAuthStateRedisDb(
         logger.verbose(`Successfully saved credentials for instance ${instanceName}`);
         return result;
       } catch (error) {
-        logger.error(`Failed to save credentials for instance ${instanceName}:`, error);
+        logger.error(`Failed to save credentials for instance ${instanceName}: ${error?.toString()}`);
         // Don't throw here - allow the auth process to continue even if Redis save fails
         logger.warn(`Credential saving failed for ${instanceName}, session may not persist across restarts`);
       }

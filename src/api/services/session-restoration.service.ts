@@ -150,7 +150,7 @@ export class SessionRestorationService {
     }
   }
 
-  private async restoreFromDatabase(clientName: string): Promise<number> {
+  public async restoreFromDatabase(clientName: string): Promise<number> {
     try {
       this.logger.info('Attempting to restore sessions from database');
 

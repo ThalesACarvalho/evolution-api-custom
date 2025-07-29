@@ -44,6 +44,7 @@ export declare namespace wa {
     pairingCode?: string;
     base64?: string;
     code?: string;
+    lastGenerated?: number | null;
   };
 
   export type Instance = {
