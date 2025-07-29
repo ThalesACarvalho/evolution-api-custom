@@ -98,4 +98,24 @@ export class CacheService {
     }
     return this.cache.keys(appendCriteria);
   }
+
+  /**
+   * Clean up corrupted Redis keys
+   */
+  async cleanupCorruptedKeys(pattern?: string): Promise<number> {
+    if (!this.cache || !this.cache.cleanupCorruptedKeys) {
+      return 0;
+    }
+    return this.cache.cleanupCorruptedKeys(pattern);
+  }
+
+  /**
+   * Get key type for debugging
+   */
+  async getKeyType(key: string): Promise<string> {
+    if (!this.cache || !this.cache.getKeyType) {
+      return 'none';
+    }
+    return this.cache.getKeyType(key);
+  }
 }

@@ -13,6 +13,7 @@ import { rmSync } from 'fs';
 import { join } from 'path';
 
 import { CacheService } from './cache.service';
+import { SessionRestorationService } from './session-restoration.service';
 
 export class WAMonitoringService {
   constructor(
@@ -49,6 +50,8 @@ export class WAMonitoringService {
             if (this.waInstances[instance]?.connectionStatus?.state === 'connecting') {
               const connectingDuration = Date.now() - (this.waInstances[instance]?.connectingStartTime || 0);
               
+              this.logger.info(`Instance ${instance} connecting for ${connectingDuration}ms`);
+              
               // Allow more time for connection if it's still within reasonable limits
               if (connectingDuration < 300000) { // 5 minutes
                 this.logger.info(`Instance ${instance} still connecting, extending timeout`);
@@ -56,16 +59,47 @@ export class WAMonitoringService {
                 return;
               }
               
-              // Force close if taking too long
+              // Check if there are Redis/Cache issues before forcing logout
+              const cacheAvailable = await this.checkCacheAvailability(instance);
+              if (!cacheAvailable) {
+                this.logger.warn(`Instance ${instance} connection timeout but cache unavailable, attempting recovery instead of logout`);
+                
+                // Try to recover the session instead of logging out
+                try {
+                  const sessionRestoration = new SessionRestorationService(
+                    this,
+                    this.cache,
+                    this.prismaRepository,
+                    this.configService
+                  );
+                  
+                  // Try to restore from database as fallback
+                  const restored = await sessionRestoration.restoreFromDatabase(
+                    this.configService.get<Database>('DATABASE').CONNECTION.CLIENT_NAME
+                  );
+                  
+                  if (restored > 0) {
+                    this.logger.info(`Successfully recovered instance ${instance} from database`);
+                    return;
+                  }
+                } catch (error) {
+                  this.logger.error(`Failed to recover instance ${instance}: ${error?.toString()}`);
+                }
+              }
+              
+              // Only force logout if we've exhausted recovery options
+              this.logger.warn(`Forcing logout for instance ${instance} after ${connectingDuration}ms connection timeout`);
+              
               if ((await this.waInstances[instance].integration) === Integration.WHATSAPP_BAILEYS) {
-                await this.waInstances[instance]?.client?.logout('Log out instance: ' + instance);
+                await this.waInstances[instance]?.client?.logout('Connection timeout after ' + connectingDuration + 'ms: ' + instance);
                 this.waInstances[instance]?.client?.ws?.close();
                 this.waInstances[instance]?.client?.end(undefined);
               }
-              this.eventEmitter.emit('remove.instance', instance, 'inner');
+              this.eventEmitter.emit('remove.instance', instance, 'timeout');
             } else {
               // Instance is closed, remove it
-              this.eventEmitter.emit('remove.instance', instance, 'inner');
+              this.logger.info(`Removing closed instance: ${instance}`);
+              this.eventEmitter.emit('remove.instance', instance, 'closed');
             }
           }
         },
@@ -426,5 +460,27 @@ export class WAMonitoringService {
         this.logger.warn(`Instance "${instanceName}" - NOT CONNECTION`);
       }
     });
+  }
+
+  /**
+   * Check if cache/Redis is available and working
+   */
+  private async checkCacheAvailability(instanceName: string): Promise<boolean> {
+    try {
+      if (!this.cache) {
+        return false;
+      }
+      
+      // Try a simple cache operation to test availability
+      const testKey = `test:${instanceName}:${Date.now()}`;
+      await this.cache.set(testKey, 'test', 5); // 5 second TTL
+      const result = await this.cache.get(testKey);
+      await this.cache.delete(testKey);
+      
+      return result === 'test';
+    } catch (error) {
+      this.logger.warn(`Cache availability check failed for ${instanceName}: ${error?.toString()}`);
+      return false;
+    }
   }
 }

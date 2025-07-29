@@ -97,4 +97,20 @@ export class LocalCache implements ICache {
       this.logger.error(error);
     }
   }
+
+  /**
+   * Get key type for debugging - Local cache doesn't have types like Redis
+   */
+  async getKeyType(key: string): Promise<string> {
+    const exists = await this.has(key);
+    return exists ? 'local' : 'none';
+  }
+
+  /**
+   * Cleanup corrupted keys - No-op for local cache
+   */
+  async cleanupCorruptedKeys(pattern?: string): Promise<number> {
+    // Local cache doesn't have type corruption issues like Redis
+    return 0;
+  }
 }

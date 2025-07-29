@@ -20,15 +20,24 @@ export class RedisCache implements ICache {
   }
   async get(key: string): Promise<any> {
     try {
-      return JSON.parse(await this.client.get(this.buildKey(key)));
+      const fullKey = this.buildKey(key);
+      const result = await this.client.get(fullKey);
+      return result ? JSON.parse(result) : null;
     } catch (error) {
-      this.logger.error(error);
+      // Handle WRONGTYPE errors by attempting to detect and fix key type issues
+      if (error.message && error.message.includes('WRONGTYPE')) {
+        this.logger.warn(`WRONGTYPE error for key ${key}, attempting to resolve...`);
+        return await this.handleWrongTypeError(key, 'get');
+      }
+      this.logger.error(`Redis get error for key ${key}:`, error);
+      return null;
     }
   }
 
   async hGet(key: string, field: string) {
     try {
-      const data = await this.client.hGet(this.buildKey(key), field);
+      const fullKey = this.buildKey(key);
+      const data = await this.client.hGet(fullKey, field);
 
       if (data) {
         return JSON.parse(data, BufferJSON.reviver);
@@ -36,25 +45,55 @@ export class RedisCache implements ICache {
 
       return null;
     } catch (error) {
-      this.logger.error(error);
+      // Handle WRONGTYPE errors by attempting to detect and fix key type issues
+      if (error.message && error.message.includes('WRONGTYPE')) {
+        this.logger.warn(`WRONGTYPE error for hash key ${key}:${field}, attempting to resolve...`);
+        return await this.handleWrongTypeError(key, 'hGet', field);
+      }
+      this.logger.error(`Redis hGet error for key ${key}:${field}:`, error);
+      return null;
     }
   }
 
   async set(key: string, value: any, ttl?: number) {
     try {
-      await this.client.setEx(this.buildKey(key), ttl || this.conf?.TTL, JSON.stringify(value));
+      const fullKey = this.buildKey(key);
+      const serializedValue = JSON.stringify(value);
+      
+      if (ttl === 0) {
+        // No expiration
+        await this.client.set(fullKey, serializedValue);
+      } else {
+        await this.client.setEx(fullKey, ttl || this.conf?.TTL, serializedValue);
+      }
+      
+      this.logger.verbose(`Redis set successful for key: ${key}`);
     } catch (error) {
-      this.logger.error(error);
+      // Handle WRONGTYPE errors by attempting to detect and fix key type issues
+      if (error.message && error.message.includes('WRONGTYPE')) {
+        this.logger.warn(`WRONGTYPE error for key ${key}, attempting to resolve...`);
+        return await this.handleWrongTypeError(key, 'set', undefined, value, ttl);
+      }
+      this.logger.error(`Redis set error for key ${key}:`, error);
+      throw error;
     }
   }
 
   async hSet(key: string, field: string, value: any) {
     try {
+      const fullKey = this.buildKey(key);
       const json = JSON.stringify(value, BufferJSON.replacer);
 
-      await this.client.hSet(this.buildKey(key), field, json);
+      await this.client.hSet(fullKey, field, json);
+      this.logger.verbose(`Redis hSet successful for key: ${key}:${field}`);
     } catch (error) {
-      this.logger.error(error);
+      // Handle WRONGTYPE errors by attempting to detect and fix key type issues
+      if (error.message && error.message.includes('WRONGTYPE')) {
+        this.logger.warn(`WRONGTYPE error for hash key ${key}:${field}, attempting to resolve...`);
+        return await this.handleWrongTypeError(key, 'hSet', field, value);
+      }
+      this.logger.error(`Redis hSet error for key ${key}:${field}:`, error);
+      throw error;
     }
   }
 
@@ -114,5 +153,113 @@ export class RedisCache implements ICache {
 
   buildKey(key: string) {
     return `${this.conf?.PREFIX_KEY}:${this.module}:${key}`;
+  }
+
+  /**
+   * Handle WRONGTYPE errors by detecting key type and attempting recovery
+   */
+  private async handleWrongTypeError(key: string, operation: string, field?: string, value?: any, ttl?: number): Promise<any> {
+    try {
+      const fullKey = this.buildKey(key);
+      
+      // Check the current type of the key
+      const keyType = await this.client.type(fullKey);
+      this.logger.info(`Key ${key} has type: ${keyType}, operation: ${operation}`);
+      
+      // If the key exists but has wrong type, delete it and retry
+      if (keyType !== 'none') {
+        this.logger.warn(`Deleting corrupted key ${key} with type ${keyType} to resolve WRONGTYPE error`);
+        await this.client.del(fullKey);
+        
+        // Retry the original operation after cleanup
+        switch (operation) {
+          case 'get':
+            return null; // Key was corrupted, return null
+          case 'hGet':
+            return null; // Key was corrupted, return null
+          case 'set':
+            if (value !== undefined) {
+              const serializedValue = JSON.stringify(value);
+              if (ttl === 0) {
+                await this.client.set(fullKey, serializedValue);
+              } else {
+                await this.client.setEx(fullKey, ttl || this.conf?.TTL, serializedValue);
+              }
+              this.logger.info(`Successfully recreated string key ${key} after WRONGTYPE cleanup`);
+            }
+            break;
+          case 'hSet':
+            if (value !== undefined && field !== undefined) {
+              const json = JSON.stringify(value, BufferJSON.replacer);
+              await this.client.hSet(fullKey, field, json);
+              this.logger.info(`Successfully recreated hash key ${key}:${field} after WRONGTYPE cleanup`);
+            }
+            break;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      this.logger.error(`Failed to handle WRONGTYPE error for key ${key}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Check if a key exists and return its type
+   */
+  async getKeyType(key: string): Promise<string> {
+    try {
+      const fullKey = this.buildKey(key);
+      return await this.client.type(fullKey);
+    } catch (error) {
+      this.logger.error(`Error checking key type for ${key}:`, error);
+      return 'none';
+    }
+  }
+
+  /**
+   * Clean up corrupted keys that have wrong types
+   */
+  async cleanupCorruptedKeys(pattern?: string): Promise<number> {
+    try {
+      const searchPattern = pattern || `${this.buildKey('')}*`;
+      let cleanedCount = 0;
+      
+      for await (const key of this.client.scanIterator({
+        MATCH: searchPattern,
+        COUNT: 100,
+      })) {
+        try {
+          const keyType = await this.client.type(key);
+          
+          // Extract the logical key name for validation
+          const logicalKey = key.replace(`${this.conf?.PREFIX_KEY}:${this.module}:`, '');
+          
+          // Define expected types for different key patterns
+          const shouldBeHash = logicalKey.includes('auth:') || 
+                             logicalKey.includes('creds') ||
+                             logicalKey.includes('session') ||
+                             logicalKey.includes('keys') ||
+                             (logicalKey.includes('-') && !logicalKey.includes('connecting_time') && !logicalKey.includes('restored'));
+          
+          const shouldBeString = !shouldBeHash;
+          
+          if ((shouldBeHash && keyType !== 'hash') || (shouldBeString && keyType !== 'string' && keyType !== 'none')) {
+            this.logger.warn(`Found corrupted key ${logicalKey} with type ${keyType}, expected ${shouldBeHash ? 'hash' : 'string'}`);
+            await this.client.del(key);
+            cleanedCount++;
+          }
+        } catch (error) {
+          this.logger.error(`Error processing key ${key} during cleanup:`, error);
+        }
+      }
+      
+      this.logger.info(`Cleaned up ${cleanedCount} corrupted Redis keys`);
+      return cleanedCount;
+    } catch (error) {
+      this.logger.error('Error during Redis key cleanup:', error);
+      return 0;
+    }
   }
 }
