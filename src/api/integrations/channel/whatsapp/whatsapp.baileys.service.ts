@@ -1925,8 +1925,26 @@ export class BaileysStartupService extends ChannelStartupService {
         }
 
         if (events['creds.update']) {
-          await this.instance.authState?.saveCreds();
-		  this.logger.info(`✅ Credentials saved to Redis for instance ${this.instance.name}`);
+           const startTime = Date.now();
+  
+			// Executar saveCreds de forma não-bloqueante com timeout
+			Promise.race([
+				this.instance.authState.saveCreds(),
+				new Promise((_, reject) => 
+				setTimeout(() => reject(new Error('SaveCreds timeout')), 5000)
+				)
+						])
+						.then(() => {
+						const duration = Date.now() - startTime;
+						this.logger.info(`✅ Credentials saved successfully in ${duration}ms for instance ${this.instance.name}`);
+						})
+						.catch((error) => {
+						const duration = Date.now() - startTime;
+						this.logger.warn(`⚠️ SaveCreds failed after ${duration}ms for instance ${this.instance.name}: ${error.message}`);
+						// Não quebrar a conexão - apenas logar o aviso
+				});
+
+				this.logger.verbose(`🔐 Credentials update event processed for instance ${this.instance.name}`);
         }
 
         if (events['messaging-history.set']) {
