@@ -101,11 +101,10 @@ async function main() {
         
         // Determine expected type based on key patterns
         const shouldBeHash = logicalKey.includes('auth:') || 
-                           logicalKey.includes(':') || 
-                           logicalKey.includes('-') ||
                            logicalKey.includes('creds') ||
                            logicalKey.includes('session') ||
-                           logicalKey.includes('keys');
+                           logicalKey.includes('keys') ||
+                           (logicalKey.includes('-') && !logicalKey.includes('connecting_time') && !logicalKey.includes('restored'));
         
         const shouldBeString = !shouldBeHash;
         const expectedType = shouldBeHash ? 'hash' : 'string';

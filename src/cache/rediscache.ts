@@ -237,8 +237,13 @@ export class RedisCache implements ICache {
           const logicalKey = key.replace(`${this.conf?.PREFIX_KEY}:${this.module}:`, '');
           
           // Define expected types for different key patterns
-          const shouldBeHash = logicalKey.includes(':') || logicalKey.includes('-'); // Auth state keys typically have separators
-          const shouldBeString = !shouldBeHash; // Instance data keys are typically simple strings
+          const shouldBeHash = logicalKey.includes('auth:') || 
+                             logicalKey.includes('creds') ||
+                             logicalKey.includes('session') ||
+                             logicalKey.includes('keys') ||
+                             (logicalKey.includes('-') && !logicalKey.includes('connecting_time') && !logicalKey.includes('restored'));
+          
+          const shouldBeString = !shouldBeHash;
           
           if ((shouldBeHash && keyType !== 'hash') || (shouldBeString && keyType !== 'string' && keyType !== 'none')) {
             this.logger.warn(`Found corrupted key ${logicalKey} with type ${keyType}, expected ${shouldBeHash ? 'hash' : 'string'}`);
