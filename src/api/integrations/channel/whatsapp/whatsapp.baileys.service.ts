@@ -238,7 +238,31 @@ export class BaileysStartupService extends ChannelStartupService {
   public phoneNumber: string;
 
   public get connectionStatus() {
+    // Verify consistency before returning status
+    this.verifyConnectionStatusConsistency();
     return this.stateConnection;
+  }
+
+  /**
+   * Verify and synchronize connection status to ensure consistency
+   */
+  private verifyConnectionStatusConsistency(): void {
+    const currentState = this.stateConnection.state;
+    
+    // Log current status for debugging
+    this.logger.debug(`Instance ${this.instance.name} connection status check: ${currentState}`);
+    
+    // If we have a client and it's connected, but our state isn't 'open', that's inconsistent
+    if (this.client && this.client.user && currentState !== 'open') {
+      this.logger.warn(`Instance ${this.instance.name} connection status inconsistency detected. Client connected but state is '${currentState}'. Correcting to 'open'.`);
+      this.stateConnection.state = 'open';
+    }
+    
+    // If we don't have a client but state is 'open', that's also inconsistent
+    if ((!this.client || !this.client.user) && currentState === 'open') {
+      this.logger.warn(`Instance ${this.instance.name} connection status inconsistency detected. No client but state is 'open'. Correcting to 'close'.`);
+      this.stateConnection.state = 'close';
+    }
   }
 
   public async logoutInstance() {
@@ -442,13 +466,27 @@ export class BaileysStartupService extends ChannelStartupService {
         where: { id: this.instanceId },
         data: { connectionStatus: 'connecting' },
       });
+      
+      // Ensure in-memory state reflects connecting status if not already open
+      if (this.stateConnection.state !== 'open') {
+        this.stateConnection.state = 'connecting';
+        this.logger.info(`QR code generated, connection status set to 'connecting' for instance ${this.instance.name}`);
+      } else {
+        this.logger.info(`QR code generated but connection already open for instance ${this.instance.name}`);
+      }
     }
 
     if (connection) {
+      const previousState = this.stateConnection.state;
       this.stateConnection = {
         state: connection,
         statusReason: (lastDisconnect?.error as Boom)?.output?.statusCode ?? 200,
       };
+      
+      // Log connection state transitions for debugging
+      if (previousState !== connection) {
+        this.logger.info(`Instance ${this.instance.name} connection state changed: ${previousState} -> ${connection}`);
+      }
     }
 
     if (connection === 'close') {
@@ -493,6 +531,9 @@ export class BaileysStartupService extends ChannelStartupService {
     }
 
     if (connection === 'open') {
+      // Explicitly update in-memory connection state to 'open'
+      this.stateConnection.state = 'open';
+      
       this.instance.wuid = this.client.user.id.replace(/:\d+/, '');
       try {
         const profilePic = await this.profilePicture(this.instance.wuid);
@@ -502,6 +543,8 @@ export class BaileysStartupService extends ChannelStartupService {
       }
       const formattedWuid = this.instance.wuid.split('@')[0].padEnd(30, ' ');
       const formattedName = this.instance.name;
+      
+      this.logger.info(`Connection state updated to 'open' for instance ${this.instance.name}`);
       this.logger.info(
         `
         ┌──────────────────────────────┐
@@ -512,6 +555,7 @@ export class BaileysStartupService extends ChannelStartupService {
         `
         wuid: ${formattedWuid}
         name: ${formattedName}
+        connectionStatus: ${this.stateConnection.state}
       `,
       );
 
@@ -565,11 +609,18 @@ export class BaileysStartupService extends ChannelStartupService {
         ...this.stateConnection,
       });
       
+      // Verify connection status consistency after successful connection
+      this.verifyConnectionStatusConsistency();
+      
       // Notify connection health service about successful connection
       this.eventEmitter.emit('instance.connected', this.instance.name);
     }
 
     if (connection === 'connecting') {
+      // Explicitly update in-memory connection state to 'connecting'
+      this.stateConnection.state = 'connecting';
+      
+      this.logger.info(`Connection state updated to 'connecting' for instance ${this.instance.name}`);
       this.sendDataWebhook(Events.CONNECTION_UPDATE, { instance: this.instance.name, ...this.stateConnection });
       
       // Notify connection health service about connecting state
@@ -814,6 +865,10 @@ export class BaileysStartupService extends ChannelStartupService {
   public async connectToWhatsapp(number?: string): Promise<WASocket> {
     try {
       this.logger.info(`Initiating WhatsApp connection for instance: ${this.instance.name}`);
+      
+      // Initialize connection state as connecting at the start
+      this.stateConnection.state = 'connecting';
+      this.logger.info(`Connection state initialized to 'connecting' for instance ${this.instance.name}`);
       
       // Reset QR code state for clean connection
       this.resetQrCodeState();
