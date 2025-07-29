@@ -113,6 +113,15 @@ eventEmitter.on('instance.state.remove', async (instanceName: string, instanceId
   await sessionRestorationService.removeInstanceState(instanceName, instanceId);
 });
 
+// Set up periodic session health check (every 5 minutes)
+setInterval(async () => {
+  try {
+    await sessionRestorationService.validateSessionHealth();
+  } catch (error) {
+    console.error('Session health check failed:', error);
+  }
+}, 5 * 60 * 1000); // 5 minutes
+
 const s3Service = new S3Service(prismaRepository);
 export const s3Controller = new S3Controller(s3Service);
 

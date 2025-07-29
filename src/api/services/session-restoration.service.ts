@@ -279,6 +279,14 @@ export class SessionRestorationService {
       
       if (connectionStatus?.state === 'open') {
         this.logger.info(`Instance ${instanceName} successfully restored and connected`);
+        
+        // Verify that the instance is actually functional by checking if it has required properties
+        if (instance.client && instance.instanceId) {
+          this.logger.info(`Instance ${instanceName} verification passed - client and instanceId present`);
+        } else {
+          this.logger.warn(`Instance ${instanceName} missing critical properties, may need reconnection`);
+          await this.attemptReconnection(instanceName, instance);
+        }
       } else if (connectionStatus?.state === 'connecting') {
         this.logger.info(`Instance ${instanceName} is still connecting after restoration`);
         // Set up a timeout to check again later
@@ -286,7 +294,7 @@ export class SessionRestorationService {
           await this.verifyInstanceConnection(instanceName);
         }, 30000); // Check again in 30 seconds
       } else {
-        this.logger.warn(`Instance ${instanceName} failed to connect after restoration, attempting reconnect`);
+        this.logger.warn(`Instance ${instanceName} failed to connect after restoration (state: ${connectionStatus?.state}), attempting reconnect`);
         await this.attemptReconnection(instanceName, instance);
       }
 
@@ -319,8 +327,10 @@ export class SessionRestorationService {
       // Save to Redis if enabled
       if (this.redis.REDIS.ENABLED && this.redis.REDIS.SAVE_INSTANCES) {
         const cacheKey = instanceData.instanceId || instanceName;
+        // Set TTL to 0 (no expiration) for instance session data to prevent premature expiration
+        // This ensures sessions are not lost due to TTL timeout
         await this.cache.set(cacheKey, instanceData, 0); // No TTL
-        this.logger.info(`Saved instance state to Redis: ${instanceName} (${cacheKey})`);
+        this.logger.info(`Saved instance state to Redis: ${instanceName} (${cacheKey}) - no TTL expiration`);
       }
 
       // Update database status if enabled
@@ -360,6 +370,66 @@ export class SessionRestorationService {
 
     } catch (error) {
       this.logger.error(`Failed to remove instance state for ${instanceName}: ${error?.toString()}`);
+    }
+  }
+
+  /**
+   * Validate session health and check for potential issues
+   */
+  public async validateSessionHealth(): Promise<void> {
+    try {
+      this.logger.info('Starting session health validation');
+      
+      const instances = Object.keys(this.waMonitor.waInstances);
+      let healthyCount = 0;
+      let unhealthyCount = 0;
+      
+      for (const instanceName of instances) {
+        const instance = this.waMonitor.waInstances[instanceName];
+        
+        if (!instance) {
+          this.logger.warn(`Instance ${instanceName} exists in waInstances but is null/undefined`);
+          unhealthyCount++;
+          continue;
+        }
+        
+        const connectionState = instance.connectionStatus?.state;
+        
+        if (connectionState === 'open') {
+          // Check if the instance has required properties for a healthy session
+          if (instance.client && instance.instanceId && instance.instance?.wuid) {
+            healthyCount++;
+            
+            // Persist healthy session state to ensure it's not lost
+            const instanceData = {
+              instanceId: instance.instanceId,
+              instanceName: instanceName,
+              integration: instance.integration,
+              token: instance.token,
+              number: instance.number,
+              businessId: instance.businessId,
+              connectionStatus: 'open',
+              ownerJid: instance.instance.wuid,
+              profileName: instance.instance.profileName,
+              profilePicUrl: instance.instance.profilePictureUrl,
+            };
+            
+            await this.persistInstanceState(instanceName, instanceData);
+            
+          } else {
+            this.logger.warn(`Instance ${instanceName} appears connected but missing critical properties`);
+            unhealthyCount++;
+          }
+        } else {
+          this.logger.warn(`Instance ${instanceName} has unhealthy connection state: ${connectionState}`);
+          unhealthyCount++;
+        }
+      }
+      
+      this.logger.info(`Session health check completed: ${healthyCount} healthy, ${unhealthyCount} unhealthy instances`);
+      
+    } catch (error) {
+      this.logger.error(`Session health validation failed: ${error?.toString()}`);
     }
   }
 }
