@@ -29,7 +29,7 @@ export class RedisCache implements ICache {
         this.logger.warn(`WRONGTYPE error for key ${key}, attempting to resolve...`);
         return await this.handleWrongTypeError(key, 'get');
       }
-      this.logger.error(`Redis get error for key ${key}:`, error);
+      this.logger.error(`Redis get error for key ${key}: ${error?.toString()}`);
       return null;
     }
   }
@@ -50,7 +50,7 @@ export class RedisCache implements ICache {
         this.logger.warn(`WRONGTYPE error for hash key ${key}:${field}, attempting to resolve...`);
         return await this.handleWrongTypeError(key, 'hGet', field);
       }
-      this.logger.error(`Redis hGet error for key ${key}:${field}:`, error);
+      this.logger.error(`Redis hGet error for key ${key}:${field}: ${error?.toString()}`);
       return null;
     }
   }
@@ -74,7 +74,7 @@ export class RedisCache implements ICache {
         this.logger.warn(`WRONGTYPE error for key ${key}, attempting to resolve...`);
         return await this.handleWrongTypeError(key, 'set', undefined, value, ttl);
       }
-      this.logger.error(`Redis set error for key ${key}:`, error);
+      this.logger.error(`Redis set error for key ${key}: ${error?.toString()}`);
       throw error;
     }
   }
@@ -92,7 +92,7 @@ export class RedisCache implements ICache {
         this.logger.warn(`WRONGTYPE error for hash key ${key}:${field}, attempting to resolve...`);
         return await this.handleWrongTypeError(key, 'hSet', field, value);
       }
-      this.logger.error(`Redis hSet error for key ${key}:${field}:`, error);
+      this.logger.error(`Redis hSet error for key ${key}:${field}: ${error?.toString()}`);
       throw error;
     }
   }
@@ -200,7 +200,7 @@ export class RedisCache implements ICache {
       
       return null;
     } catch (error) {
-      this.logger.error(`Failed to handle WRONGTYPE error for key ${key}:`, error);
+      this.logger.error(`Failed to handle WRONGTYPE error for key ${key}: ${error?.toString()}`);
       return null;
     }
   }
@@ -213,7 +213,7 @@ export class RedisCache implements ICache {
       const fullKey = this.buildKey(key);
       return await this.client.type(fullKey);
     } catch (error) {
-      this.logger.error(`Error checking key type for ${key}:`, error);
+      this.logger.error(`Error checking key type for ${key}: ${error?.toString()}`);
       return 'none';
     }
   }
@@ -251,14 +251,14 @@ export class RedisCache implements ICache {
             cleanedCount++;
           }
         } catch (error) {
-          this.logger.error(`Error processing key ${key} during cleanup:`, error);
+          this.logger.error(`Error processing key ${key} during cleanup: ${error?.toString()}`);
         }
       }
       
       this.logger.info(`Cleaned up ${cleanedCount} corrupted Redis keys`);
       return cleanedCount;
     } catch (error) {
-      this.logger.error('Error during Redis key cleanup:', error);
+      this.logger.error(`Error during Redis key cleanup: ${error?.toString()}`);
       return 0;
     }
   }
