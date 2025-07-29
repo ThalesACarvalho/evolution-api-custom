@@ -1925,7 +1925,8 @@ export class BaileysStartupService extends ChannelStartupService {
         }
 
         if (events['creds.update']) {
-          this.instance.authState.saveCreds();
+          await this.instance.authState?.saveCreds();
+		  this.logger.info(`✅ Credentials saved to Redis for instance ${this.instance.name}`);
         }
 
         if (events['messaging-history.set']) {

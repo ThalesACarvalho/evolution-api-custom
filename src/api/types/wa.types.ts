@@ -51,7 +51,7 @@ export declare namespace wa {
     id?: string;
     qrcode?: QrCode;
     pairingCode?: string;
-    authState?: { state: AuthenticationState; saveCreds: () => void };
+    authState?: { state: AuthenticationState; saveCreds: () => Promise<void>};
     name?: string;
     wuid?: string;
     profileName?: string;
