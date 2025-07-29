@@ -19,7 +19,7 @@ export async function useMultiFileAuthStateRedisDb(
       return await cache.hSet(authKey, key, data);
     } catch (error) {
       logger.error({ localError: 'writeData', error, key, instanceName });
-      
+
       // If Redis fails, log the error but don't crash the authentication process
       // The system should continue to work with in-memory auth state
       logger.warn(`Auth state write failed for ${instanceName}:${key}, continuing with in-memory state`);
@@ -35,7 +35,7 @@ export async function useMultiFileAuthStateRedisDb(
       return await cache.hGet(authKey, key);
     } catch (error) {
       logger.error({ localError: 'readData', error, key, instanceName });
-      
+
       // If reading fails due to Redis issues, return null to trigger fresh auth
       logger.warn(`Auth state read failed for ${instanceName}:${key}, will use fresh auth state`);
       return null;
@@ -50,7 +50,7 @@ export async function useMultiFileAuthStateRedisDb(
       return await cache.hDelete(authKey, key);
     } catch (error) {
       logger.error({ localError: 'removeData', error, key, instanceName });
-      
+
       // If removal fails, log but continue - this is not critical
       logger.warn(`Auth state removal failed for ${instanceName}:${key}, continuing`);
       return null;
@@ -58,12 +58,12 @@ export async function useMultiFileAuthStateRedisDb(
   };
 
   let creds: AuthenticationCreds;
-  
+
   try {
     // Attempt to load credentials from Redis
     const storedCreds = await readData('creds');
     creds = storedCreds || initAuthCreds();
-    
+
     if (storedCreds) {
       logger.info(`Loaded existing auth credentials for instance ${instanceName}`);
     } else {

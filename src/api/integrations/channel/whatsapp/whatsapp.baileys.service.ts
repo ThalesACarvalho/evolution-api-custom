@@ -248,19 +248,23 @@ export class BaileysStartupService extends ChannelStartupService {
    */
   private verifyConnectionStatusConsistency(): void {
     const currentState = this.stateConnection.state;
-    
+
     // Log current status for debugging
     this.logger.debug(`Instance ${this.instance.name} connection status check: ${currentState}`);
-    
+
     // If we have a client and it's connected, but our state isn't 'open', that's inconsistent
     if (this.client && this.client.user && currentState !== 'open') {
-      this.logger.warn(`Instance ${this.instance.name} connection status inconsistency detected. Client connected but state is '${currentState}'. Correcting to 'open'.`);
+      this.logger.warn(
+        `Instance ${this.instance.name} connection status inconsistency detected. Client connected but state is '${currentState}'. Correcting to 'open'.`,
+      );
       this.stateConnection.state = 'open';
     }
-    
+
     // If we don't have a client but state is 'open', that's also inconsistent
     if ((!this.client || !this.client.user) && currentState === 'open') {
-      this.logger.warn(`Instance ${this.instance.name} connection status inconsistency detected. No client but state is 'open'. Correcting to 'close'.`);
+      this.logger.warn(
+        `Instance ${this.instance.name} connection status inconsistency detected. No client but state is 'open'. Correcting to 'close'.`,
+      );
       this.stateConnection.state = 'close';
     }
   }
@@ -313,12 +317,12 @@ export class BaileysStartupService extends ChannelStartupService {
    * Reset QR code state to ensure clean initialization
    */
   private resetQrCodeState(): void {
-    this.instance.qrcode = { 
-      count: 0, 
-      code: null, 
-      base64: null, 
+    this.instance.qrcode = {
+      count: 0,
+      code: null,
+      base64: null,
       pairingCode: null,
-      lastGenerated: null
+      lastGenerated: null,
     };
     this.logger.info(`QR code state reset for instance ${this.instance.name}`);
   }
@@ -335,22 +339,24 @@ export class BaileysStartupService extends ChannelStartupService {
   private async connectionUpdate({ qr, connection, lastDisconnect }: Partial<ConnectionState>) {
     // Ensure QR code is properly initialized
     this.ensureQrCodeInitialized();
-    
+
     if (qr) {
       // Implement QR code spam prevention
       const now = Date.now();
       const lastQrTime = this.instance.qrcode.lastGenerated || 0;
       const timeSinceLastQr = now - lastQrTime;
       const minQrInterval = 60000; // 1 minute minimum between QR generations
-      
+
       if (timeSinceLastQr < minQrInterval && this.instance.qrcode.count > 0) {
-        this.logger.warn(`QR code generation too frequent for ${this.instance.name}, last generated ${timeSinceLastQr}ms ago. Minimum interval: ${minQrInterval}ms`);
+        this.logger.warn(
+          `QR code generation too frequent for ${this.instance.name}, last generated ${timeSinceLastQr}ms ago. Minimum interval: ${minQrInterval}ms`,
+        );
         return; // Skip QR generation to prevent spam
       }
-      
+
       if (this.instance.qrcode.count === this.configService.get<QrCode>('QRCODE').LIMIT) {
         this.logger.warn(`QR code limit reached for instance ${this.instance.name}`);
-        
+
         this.sendDataWebhook(Events.QRCODE_UPDATED, {
           message: 'QR code limit reached, please login again',
           statusCode: DisconnectReason.badSession,
@@ -380,7 +386,7 @@ export class BaileysStartupService extends ChannelStartupService {
 
       this.instance.qrcode.count++;
       this.instance.qrcode.lastGenerated = now;
-      
+
       this.logger.info(`Generating QR code #${this.instance.qrcode.count} for instance ${this.instance.name}`);
 
       const color = this.configService.get<QrCode>('QRCODE').COLOR;
@@ -402,18 +408,18 @@ export class BaileysStartupService extends ChannelStartupService {
       qrcode.toDataURL(qr, optsQrcode, (error, base64) => {
         if (error) {
           this.logger.error('Qrcode generate failed:' + error.toString());
-          
+
           // Try to emit QR code event even if base64 generation fails
           this.instance.qrcode.code = qr;
           this.instance.qrcode.base64 = null;
-          
+
           this.sendDataWebhook(Events.QRCODE_UPDATED, {
-            qrcode: { 
-              instance: this.instance.name, 
-              pairingCode: this.instance.qrcode.pairingCode, 
-              code: qr, 
+            qrcode: {
+              instance: this.instance.name,
+              pairingCode: this.instance.qrcode.pairingCode,
+              code: qr,
               base64: null,
-              error: 'Failed to generate base64 QR code'
+              error: 'Failed to generate base64 QR code',
             },
           });
 
@@ -422,12 +428,12 @@ export class BaileysStartupService extends ChannelStartupService {
               Events.QRCODE_UPDATED,
               { instanceName: this.instance.name, instanceId: this.instanceId },
               {
-                qrcode: { 
-                  instance: this.instance.name, 
-                  pairingCode: this.instance.qrcode.pairingCode, 
-                  code: qr, 
+                qrcode: {
+                  instance: this.instance.name,
+                  pairingCode: this.instance.qrcode.pairingCode,
+                  code: qr,
                   base64: null,
-                  error: 'Failed to generate base64 QR code'
+                  error: 'Failed to generate base64 QR code',
                 },
               },
             );
@@ -451,8 +457,10 @@ export class BaileysStartupService extends ChannelStartupService {
             },
           );
         }
-        
-        this.logger.info(`QR code generated successfully for instance ${this.instance.name}, count: ${this.instance.qrcode.count}`);
+
+        this.logger.info(
+          `QR code generated successfully for instance ${this.instance.name}, count: ${this.instance.qrcode.count}`,
+        );
       });
 
       qrcodeTerminal.generate(qr, { small: true }, (qrcode) =>
@@ -466,7 +474,7 @@ export class BaileysStartupService extends ChannelStartupService {
         where: { id: this.instanceId },
         data: { connectionStatus: 'connecting' },
       });
-      
+
       // Ensure in-memory state reflects connecting status if not already open
       if (this.stateConnection.state !== 'open') {
         this.stateConnection.state = 'connecting';
@@ -482,7 +490,7 @@ export class BaileysStartupService extends ChannelStartupService {
         state: connection,
         statusReason: (lastDisconnect?.error as Boom)?.output?.statusCode ?? 200,
       };
-      
+
       // Log connection state transitions for debugging
       if (previousState !== connection) {
         this.logger.info(`Instance ${this.instance.name} connection state changed: ${previousState} -> ${connection}`);
@@ -533,7 +541,7 @@ export class BaileysStartupService extends ChannelStartupService {
     if (connection === 'open') {
       // Explicitly update in-memory connection state to 'open'
       this.stateConnection.state = 'open';
-      
+
       this.instance.wuid = this.client.user.id.replace(/:\d+/, '');
       try {
         const profilePic = await this.profilePicture(this.instance.wuid);
@@ -543,7 +551,7 @@ export class BaileysStartupService extends ChannelStartupService {
       }
       const formattedWuid = this.instance.wuid.split('@')[0].padEnd(30, ' ');
       const formattedName = this.instance.name;
-      
+
       this.logger.info(`Connection state updated to 'open' for instance ${this.instance.name}`);
       this.logger.info(
         `
@@ -583,10 +591,10 @@ export class BaileysStartupService extends ChannelStartupService {
           profileName: await this.getProfileName(),
           profilePicUrl: this.instance.profilePictureUrl,
         };
-        
+
         // Emit event for session persistence
         this.eventEmitter.emit('instance.state.persist', this.instance.name, instanceData);
-        
+
         this.logger.info(`Instance state persisted for ${this.instance.name}`);
       } catch (error) {
         this.logger.error(`Failed to persist instance state for ${this.instance.name}: ${error?.toString()}`);
@@ -608,10 +616,10 @@ export class BaileysStartupService extends ChannelStartupService {
         profilePictureUrl: this.instance.profilePictureUrl,
         ...this.stateConnection,
       });
-      
+
       // Verify connection status consistency after successful connection
       this.verifyConnectionStatusConsistency();
-      
+
       // Notify connection health service about successful connection
       this.eventEmitter.emit('instance.connected', this.instance.name);
     }
@@ -619,10 +627,10 @@ export class BaileysStartupService extends ChannelStartupService {
     if (connection === 'connecting') {
       // Explicitly update in-memory connection state to 'connecting'
       this.stateConnection.state = 'connecting';
-      
+
       this.logger.info(`Connection state updated to 'connecting' for instance ${this.instance.name}`);
       this.sendDataWebhook(Events.CONNECTION_UPDATE, { instance: this.instance.name, ...this.stateConnection });
-      
+
       // Notify connection health service about connecting state
       this.eventEmitter.emit('instance.connecting', this.instance.name);
     }
@@ -678,13 +686,13 @@ export class BaileysStartupService extends ChannelStartupService {
           return authState;
         } catch (redisError) {
           this.logger.error(`Redis auth state failed for instance ${this.instance.name}: ${redisError?.toString()}`);
-          
+
           // If Redis fails, fall back to database if available
           if (db.SAVE_DATA.INSTANCE) {
             this.logger.warn(`Falling back to database auth state for instance ${this.instance.name}`);
             return await useMultiFileAuthStatePrisma(this.instance.id, this.cache);
           }
-          
+
           // If no database fallback, throw the error to trigger fresh auth
           throw redisError;
         }
@@ -697,10 +705,9 @@ export class BaileysStartupService extends ChannelStartupService {
 
       this.logger.warn(`No persistent auth state configured for instance ${this.instance.name}, using in-memory state`);
       return null;
-
     } catch (error) {
       this.logger.error(`Failed to define auth state for instance ${this.instance.name}: ${error?.toString()}`);
-      
+
       // Return null to trigger fresh authentication rather than crashing
       this.logger.warn(`Falling back to fresh authentication for instance ${this.instance.name}`);
       return null;
@@ -865,19 +872,19 @@ export class BaileysStartupService extends ChannelStartupService {
   public async connectToWhatsapp(number?: string): Promise<WASocket> {
     try {
       this.logger.info(`Initiating WhatsApp connection for instance: ${this.instance.name}`);
-      
+
       // Initialize connection state as connecting at the start
       this.stateConnection.state = 'connecting';
       this.logger.info(`Connection state initialized to 'connecting' for instance ${this.instance.name}`);
-      
+
       // Reset QR code state for clean connection
       this.resetQrCodeState();
-      
+
       // Track connection start time for timeout detection
       if (this.instance) {
         this.instance.connectingStartTime = Date.now();
       }
-      
+
       this.loadChatwoot();
       this.loadSettings();
       this.loadWebhook();

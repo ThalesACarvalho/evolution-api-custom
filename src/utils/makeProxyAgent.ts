@@ -1,5 +1,5 @@
-import { HttpsProxyAgent } from 'https-proxy-agent';
 import { HttpProxyAgent } from 'http-proxy-agent';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
 type Proxy = {
   host: string;
@@ -16,7 +16,8 @@ export function makeProxyAgent(proxy: Proxy | string) {
     // ✅ Se vier um IP puro ou host sem protocolo, assume HTTP
     proxyUrl = proxy.includes('://') ? proxy : `http://${proxy}`;
   } else {
-    let { host, password, port, protocol, username } = proxy;
+    const { host, password, port, username } = proxy;
+    let { protocol } = proxy;
 
     // ✅ Se não especificar protocolo, assume HTTP por padrão
     if (!protocol || protocol.trim() === '') {

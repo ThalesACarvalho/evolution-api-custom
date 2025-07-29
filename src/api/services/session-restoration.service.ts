@@ -1,10 +1,10 @@
-import { Logger } from '@config/logger.config';
-import { WAMonitoringService } from '@api/services/monitor.service';
-import { CacheService } from '@api/services/cache.service';
-import { PrismaRepository } from '@api/repository/repository.service';
 import { InstanceDto } from '@api/dto/instance.dto';
-import { Database, CacheConf, ConfigService } from '@config/env.config';
+import { PrismaRepository } from '@api/repository/repository.service';
+import { CacheService } from '@api/services/cache.service';
+import { WAMonitoringService } from '@api/services/monitor.service';
 import { Integration } from '@api/types/wa.types';
+import { CacheConf, ConfigService, Database } from '@config/env.config';
+import { Logger } from '@config/logger.config';
 
 export class SessionRestorationService {
   private readonly logger = new Logger('SessionRestorationService');
@@ -50,7 +50,6 @@ export class SessionRestorationService {
 
       // Start connection verification for all restored instances
       await this.verifyRestoredConnections();
-
     } catch (error) {
       this.logger.error(`Session restoration failed: ${error?.toString()}`);
       throw error;
@@ -60,7 +59,7 @@ export class SessionRestorationService {
   private async restoreFromRedisCache(): Promise<number> {
     try {
       this.logger.info('Attempting to restore sessions from Redis cache');
-      
+
       // First, attempt to clean up any corrupted keys
       if (this.cache?.cleanupCorruptedKeys) {
         const cleanedCount = await this.cache.cleanupCorruptedKeys();
@@ -68,7 +67,7 @@ export class SessionRestorationService {
           this.logger.info(`Cleaned up ${cleanedCount} corrupted Redis keys before restoration`);
         }
       }
-      
+
       // Use the correct key pattern - the cache service automatically builds the full key
       const keys = await this.cache.keys('');
       if (!keys || keys.length === 0) {
@@ -86,23 +85,25 @@ export class SessionRestorationService {
           const keyParts = fullKey.split(':');
           if (keyParts.length >= 3 && keyParts[1] === 'instance') {
             const instanceKey = keyParts.slice(2).join(':'); // Handle cases where instanceId contains ':'
-            
+
             // Skip keys that are not actual instance data (like connecting_time, restored)
-            if (instanceKey.includes('connecting_time') || 
-                instanceKey.includes('restored') || 
-                instanceKey.includes('creds') ||
-                instanceKey.includes('-')) {
+            if (
+              instanceKey.includes('connecting_time') ||
+              instanceKey.includes('restored') ||
+              instanceKey.includes('creds') ||
+              instanceKey.includes('-')
+            ) {
               continue;
             }
-            
+
             // Try to get instance data from cache using just the instanceKey
             this.logger.info(`Attempting to restore instance from key: ${instanceKey}`);
-            
+
             try {
               const instanceData = await this.cache.get(instanceKey);
               if (instanceData) {
                 const parsedData = typeof instanceData === 'string' ? JSON.parse(instanceData) : instanceData;
-                
+
                 // Validate that this looks like instance data
                 if (parsedData && (parsedData.instanceName || parsedData.instanceId)) {
                   await this.restoreInstance(parsedData);
@@ -115,8 +116,10 @@ export class SessionRestorationService {
                 this.logger.warn(`No data found for instance key: ${instanceKey}`);
               }
             } catch (redisError) {
-              this.logger.warn(`Redis error for key ${instanceKey}, attempting database fallback: ${redisError?.toString()}`);
-              
+              this.logger.warn(
+                `Redis error for key ${instanceKey}, attempting database fallback: ${redisError?.toString()}`,
+              );
+
               // If Redis fails for this key, try to restore from database as fallback
               if (this.db.SAVE_DATA.INSTANCE) {
                 const dbInstance = await this.findInstanceInDatabase(instanceKey);
@@ -135,17 +138,16 @@ export class SessionRestorationService {
 
       this.logger.info(`Restored ${restored} instances from Redis cache`);
       return restored;
-
     } catch (error) {
       this.logger.error(`Failed to restore from Redis cache: ${error?.toString()}`);
-      
+
       // If Redis completely fails, fall back to database restoration
       if (this.db.SAVE_DATA.INSTANCE) {
         this.logger.info('Redis cache failed, attempting fallback to database restoration');
         const clientName = this.configService.get<Database>('DATABASE').CONNECTION.CLIENT_NAME;
         return await this.restoreFromDatabase(clientName);
       }
-      
+
       return 0;
     }
   }
@@ -155,10 +157,10 @@ export class SessionRestorationService {
       this.logger.info('Attempting to restore sessions from database');
 
       const instances = await this.prismaRepository.instance.findMany({
-        where: { 
+        where: {
           clientName: clientName,
           // Only restore instances that were previously connected or trying to connect
-          connectionStatus: { in: ['open', 'connecting'] }
+          connectionStatus: { in: ['open', 'connecting'] },
         },
         include: {
           Webhook: true,
@@ -186,15 +188,17 @@ export class SessionRestorationService {
             number: instance.number,
             businessId: instance.businessId,
             // Include webhook settings if available
-            webhook: instance.Webhook ? {
-              enabled: true,
-              url: instance.Webhook.url,
-              events: Array.isArray(instance.Webhook.events) 
-                ? instance.Webhook.events.filter((event): event is string => typeof event === 'string')
-                : [],
-              byEvents: instance.Webhook.webhookByEvents,
-              base64: instance.Webhook.webhookBase64,
-            } : undefined,
+            webhook: instance.Webhook
+              ? {
+                  enabled: true,
+                  url: instance.Webhook.url,
+                  events: Array.isArray(instance.Webhook.events)
+                    ? instance.Webhook.events.filter((event): event is string => typeof event === 'string')
+                    : [],
+                  byEvents: instance.Webhook.webhookByEvents,
+                  base64: instance.Webhook.webhookBase64,
+                }
+              : undefined,
             // Include chatwoot settings if available
             chatwootAccountId: instance.Chatwoot?.accountId,
             chatwootToken: instance.Chatwoot?.token,
@@ -217,7 +221,6 @@ export class SessionRestorationService {
 
           await this.restoreInstance(instanceData);
           restored++;
-
         } catch (error) {
           this.logger.error(`Failed to restore instance ${instance.name}: ${error?.toString()}`);
         }
@@ -225,7 +228,6 @@ export class SessionRestorationService {
 
       this.logger.info(`Restored ${restored} instances from database`);
       return restored;
-
     } catch (error) {
       this.logger.error(`Failed to restore from database: ${error?.toString()}`);
       return 0;
@@ -266,7 +268,6 @@ export class SessionRestorationService {
       await this.cache.set(`restored:${instanceData.instanceName}`, 'true', 300);
 
       this.logger.info(`Successfully restored and connected instance: ${instanceData.instanceName}`);
-
     } catch (error) {
       this.logger.error(`Failed to restore instance ${instanceData.instanceName}: ${error?.toString()}`);
       throw error;
@@ -278,7 +279,7 @@ export class SessionRestorationService {
       this.logger.info('Verifying restored connections');
 
       const instanceNames = Object.keys(this.waMonitor.waInstances);
-      
+
       for (const instanceName of instanceNames) {
         const wasRestored = await this.cache.get(`restored:${instanceName}`);
         if (wasRestored) {
@@ -288,7 +289,6 @@ export class SessionRestorationService {
           }, 10000); // 10 seconds delay
         }
       }
-
     } catch (error) {
       this.logger.error(`Failed to verify restored connections: ${error?.toString()}`);
     }
@@ -303,10 +303,10 @@ export class SessionRestorationService {
       }
 
       const connectionStatus = instance.connectionStatus;
-      
+
       if (connectionStatus?.state === 'open') {
         this.logger.info(`Instance ${instanceName} successfully restored and connected`);
-        
+
         // Verify that the instance is actually functional by checking if it has required properties
         if (instance.client && instance.instanceId) {
           this.logger.info(`Instance ${instanceName} verification passed - client and instanceId present`);
@@ -321,13 +321,14 @@ export class SessionRestorationService {
           await this.verifyInstanceConnection(instanceName);
         }, 30000); // Check again in 30 seconds
       } else {
-        this.logger.warn(`Instance ${instanceName} failed to connect after restoration (state: ${connectionStatus?.state}), attempting reconnect`);
+        this.logger.warn(
+          `Instance ${instanceName} failed to connect after restoration (state: ${connectionStatus?.state}), attempting reconnect`,
+        );
         await this.attemptReconnection(instanceName, instance);
       }
 
       // Clean up the restoration marker
       await this.cache.delete(`restored:${instanceName}`);
-
     } catch (error) {
       this.logger.error(`Failed to verify connection for ${instanceName}: ${error?.toString()}`);
     }
@@ -336,11 +337,10 @@ export class SessionRestorationService {
   private async attemptReconnection(instanceName: string, instance: any): Promise<void> {
     try {
       this.logger.info(`Attempting reconnection for instance ${instanceName}`);
-      
+
       if (instance.integration === Integration.WHATSAPP_BAILEYS) {
         await instance.connectToWhatsapp(instance.phoneNumber);
       }
-
     } catch (error) {
       this.logger.error(`Failed to reconnect instance ${instanceName}: ${error?.toString()}`);
     }
@@ -374,7 +374,6 @@ export class SessionRestorationService {
         });
         this.logger.info(`Updated instance state in database: ${instanceName}`);
       }
-
     } catch (error) {
       this.logger.error(`Failed to persist instance state for ${instanceName}: ${error?.toString()}`);
     }
@@ -394,7 +393,6 @@ export class SessionRestorationService {
       // Clear any restoration markers
       await this.cache.delete(`restored:${instanceName}`);
       await this.cache.delete(`connecting_time:${instanceName}`);
-
     } catch (error) {
       this.logger.error(`Failed to remove instance state for ${instanceName}: ${error?.toString()}`);
     }
@@ -406,27 +404,27 @@ export class SessionRestorationService {
   public async validateSessionHealth(): Promise<void> {
     try {
       this.logger.info('Starting session health validation');
-      
+
       const instances = Object.keys(this.waMonitor.waInstances);
       let healthyCount = 0;
       let unhealthyCount = 0;
-      
+
       for (const instanceName of instances) {
         const instance = this.waMonitor.waInstances[instanceName];
-        
+
         if (!instance) {
           this.logger.warn(`Instance ${instanceName} exists in waInstances but is null/undefined`);
           unhealthyCount++;
           continue;
         }
-        
+
         const connectionState = instance.connectionStatus?.state;
-        
+
         if (connectionState === 'open') {
           // Check if the instance has required properties for a healthy session
           if (instance.client && instance.instanceId && instance.instance?.wuid) {
             healthyCount++;
-            
+
             // Persist healthy session state to ensure it's not lost
             const instanceData = {
               instanceId: instance.instanceId,
@@ -440,9 +438,8 @@ export class SessionRestorationService {
               profileName: instance.instance.profileName,
               profilePicUrl: instance.instance.profilePictureUrl,
             };
-            
+
             await this.persistInstanceState(instanceName, instanceData);
-            
           } else {
             this.logger.warn(`Instance ${instanceName} appears connected but missing critical properties`);
             unhealthyCount++;
@@ -452,9 +449,10 @@ export class SessionRestorationService {
           unhealthyCount++;
         }
       }
-      
-      this.logger.info(`Session health check completed: ${healthyCount} healthy, ${unhealthyCount} unhealthy instances`);
-      
+
+      this.logger.info(
+        `Session health check completed: ${healthyCount} healthy, ${unhealthyCount} unhealthy instances`,
+      );
     } catch (error) {
       this.logger.error(`Session health validation failed: ${error?.toString()}`);
     }
@@ -466,15 +464,15 @@ export class SessionRestorationService {
   private async findInstanceInDatabase(instanceKey: string): Promise<InstanceDto | null> {
     try {
       const clientName = this.configService.get<Database>('DATABASE').CONNECTION.CLIENT_NAME;
-      
+
       // Try to find by ID first, then by name
       const instance = await this.prismaRepository.instance.findFirst({
         where: {
           OR: [
             { id: instanceKey, clientName },
-            { name: instanceKey, clientName }
+            { name: instanceKey, clientName },
           ],
-          connectionStatus: { in: ['open', 'connecting'] }
+          connectionStatus: { in: ['open', 'connecting'] },
         },
         include: {
           Webhook: true,
@@ -495,15 +493,17 @@ export class SessionRestorationService {
         token: instance.token,
         number: instance.number,
         businessId: instance.businessId,
-        webhook: instance.Webhook ? {
-          enabled: true,
-          url: instance.Webhook.url,
-          events: Array.isArray(instance.Webhook.events) 
-            ? instance.Webhook.events.filter((event): event is string => typeof event === 'string')
-            : [],
-          byEvents: instance.Webhook.webhookByEvents,
-          base64: instance.Webhook.webhookBase64,
-        } : undefined,
+        webhook: instance.Webhook
+          ? {
+              enabled: true,
+              url: instance.Webhook.url,
+              events: Array.isArray(instance.Webhook.events)
+                ? instance.Webhook.events.filter((event): event is string => typeof event === 'string')
+                : [],
+              byEvents: instance.Webhook.webhookByEvents,
+              base64: instance.Webhook.webhookBase64,
+            }
+          : undefined,
         chatwootAccountId: instance.Chatwoot?.accountId,
         chatwootToken: instance.Chatwoot?.token,
         chatwootUrl: instance.Chatwoot?.url,

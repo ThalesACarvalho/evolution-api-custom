@@ -1,7 +1,7 @@
-import { Logger } from '@config/logger.config';
-import { Events, Integration } from '@api/types/wa.types';
 import { CacheService } from '@api/services/cache.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
+import { Integration } from '@api/types/wa.types';
+import { Logger } from '@config/logger.config';
 import cron from 'node-cron';
 
 export class ConnectionHealthService {
@@ -35,10 +35,10 @@ export class ConnectionHealthService {
   private async performHealthChecks() {
     try {
       const instances = Object.keys(this.waMonitor.waInstances);
-      
+
       for (const instanceName of instances) {
         const instance = this.waMonitor.waInstances[instanceName];
-        
+
         if (!instance) continue;
 
         await this.checkInstanceHealth(instanceName, instance);
@@ -61,7 +61,7 @@ export class ConnectionHealthService {
       // Check if connection status claims to be open but WebSocket is closed
       if (connectionStatus?.state === 'open') {
         const isWebSocketOpen = this.isWebSocketHealthy(client);
-        
+
         if (!isWebSocketOpen) {
           this.logger.warn(`Instance ${instanceName}: Connection status mismatch detected`);
           await this.handleConnectionMismatch(instanceName, instance);
@@ -84,7 +84,6 @@ export class ConnectionHealthService {
           await this.handleConnectionTimeout(instanceName, instance);
         }
       }
-
     } catch (error) {
       this.logger.error(`Health check failed for instance ${instanceName}: ${error?.toString()}`);
     }
@@ -92,7 +91,7 @@ export class ConnectionHealthService {
 
   private isWebSocketHealthy(client: any): boolean {
     if (!client?.ws) return false;
-    
+
     const wsState = client.ws.readyState;
     return wsState === 1; // WebSocket.OPEN
   }
@@ -104,9 +103,7 @@ export class ConnectionHealthService {
       }
 
       // Simple ping test - check if we can get user info
-      const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Ping timeout')), 10000)
-      );
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Ping timeout')), 10000));
 
       const pingTest = client.user ? Promise.resolve(client.user) : Promise.reject(new Error('No user'));
 
@@ -121,13 +118,12 @@ export class ConnectionHealthService {
   private async handleConnectionMismatch(instanceName: string, instance: any) {
     try {
       this.logger.info(`Attempting to reconnect instance ${instanceName} due to connection mismatch`);
-      
+
       // Update connection status to reflect reality
       instance.stateConnection.state = 'close';
-      
+
       // Trigger reconnection
       await instance.connectToWhatsapp(instance.phoneNumber);
-      
     } catch (error) {
       this.logger.error(`Failed to handle connection mismatch for ${instanceName}: ${error?.toString()}`);
     }
@@ -136,16 +132,15 @@ export class ConnectionHealthService {
   private async handleConnectionFailure(instanceName: string, instance: any) {
     try {
       this.logger.info(`Handling connection failure for instance ${instanceName}`);
-      
+
       // Close the WebSocket properly
       if (instance.client?.ws) {
         instance.client.ws.close();
       }
-      
+
       // Update status and reconnect
       instance.stateConnection.state = 'close';
       await instance.connectToWhatsapp(instance.phoneNumber);
-      
     } catch (error) {
       this.logger.error(`Failed to handle connection failure for ${instanceName}: ${error?.toString()}`);
     }
@@ -154,19 +149,18 @@ export class ConnectionHealthService {
   private async handleConnectionTimeout(instanceName: string, instance: any) {
     try {
       this.logger.info(`Handling connection timeout for instance ${instanceName}`);
-      
+
       // Reset connection state
       if (instance.client?.ws) {
         instance.client.ws.close();
       }
-      
+
       // Clear connecting timestamp
       await this.clearConnectingTime(instanceName);
-      
+
       // Restart connection process
       instance.stateConnection.state = 'close';
       await instance.connectToWhatsapp(instance.phoneNumber);
-      
     } catch (error) {
       this.logger.error(`Failed to handle connection timeout for ${instanceName}: ${error?.toString()}`);
     }

@@ -59,14 +59,14 @@ export class RedisCache implements ICache {
     try {
       const fullKey = this.buildKey(key);
       const serializedValue = JSON.stringify(value);
-      
+
       if (ttl === 0) {
         // No expiration
         await this.client.set(fullKey, serializedValue);
       } else {
         await this.client.setEx(fullKey, ttl || this.conf?.TTL, serializedValue);
       }
-      
+
       this.logger.verbose(`Redis set successful for key: ${key}`);
     } catch (error) {
       // Handle WRONGTYPE errors by attempting to detect and fix key type issues
@@ -158,19 +158,25 @@ export class RedisCache implements ICache {
   /**
    * Handle WRONGTYPE errors by detecting key type and attempting recovery
    */
-  private async handleWrongTypeError(key: string, operation: string, field?: string, value?: any, ttl?: number): Promise<any> {
+  private async handleWrongTypeError(
+    key: string,
+    operation: string,
+    field?: string,
+    value?: any,
+    ttl?: number,
+  ): Promise<any> {
     try {
       const fullKey = this.buildKey(key);
-      
+
       // Check the current type of the key
       const keyType = await this.client.type(fullKey);
       this.logger.info(`Key ${key} has type: ${keyType}, operation: ${operation}`);
-      
+
       // If the key exists but has wrong type, delete it and retry
       if (keyType !== 'none') {
         this.logger.warn(`Deleting corrupted key ${key} with type ${keyType} to resolve WRONGTYPE error`);
         await this.client.del(fullKey);
-        
+
         // Retry the original operation after cleanup
         switch (operation) {
           case 'get':
@@ -197,7 +203,7 @@ export class RedisCache implements ICache {
             break;
         }
       }
-      
+
       return null;
     } catch (error) {
       this.logger.error(`Failed to handle WRONGTYPE error for key ${key}: ${error?.toString()}`);
@@ -225,28 +231,31 @@ export class RedisCache implements ICache {
     try {
       const searchPattern = pattern || `${this.buildKey('')}*`;
       let cleanedCount = 0;
-      
+
       for await (const key of this.client.scanIterator({
         MATCH: searchPattern,
         COUNT: 100,
       })) {
         try {
           const keyType = await this.client.type(key);
-          
+
           // Extract the logical key name for validation
           const logicalKey = key.replace(`${this.conf?.PREFIX_KEY}:${this.module}:`, '');
-          
+
           // Define expected types for different key patterns
-          const shouldBeHash = logicalKey.includes('auth:') || 
-                             logicalKey.includes('creds') ||
-                             logicalKey.includes('session') ||
-                             logicalKey.includes('keys') ||
-                             (logicalKey.includes('-') && !logicalKey.includes('connecting_time') && !logicalKey.includes('restored'));
-          
+          const shouldBeHash =
+            logicalKey.includes('auth:') ||
+            logicalKey.includes('creds') ||
+            logicalKey.includes('session') ||
+            logicalKey.includes('keys') ||
+            (logicalKey.includes('-') && !logicalKey.includes('connecting_time') && !logicalKey.includes('restored'));
+
           const shouldBeString = !shouldBeHash;
-          
+
           if ((shouldBeHash && keyType !== 'hash') || (shouldBeString && keyType !== 'string' && keyType !== 'none')) {
-            this.logger.warn(`Found corrupted key ${logicalKey} with type ${keyType}, expected ${shouldBeHash ? 'hash' : 'string'}`);
+            this.logger.warn(
+              `Found corrupted key ${logicalKey} with type ${keyType}, expected ${shouldBeHash ? 'hash' : 'string'}`,
+            );
             await this.client.del(key);
             cleanedCount++;
           }
@@ -254,7 +263,7 @@ export class RedisCache implements ICache {
           this.logger.error(`Error processing key ${key} during cleanup: ${error?.toString()}`);
         }
       }
-      
+
       this.logger.info(`Cleaned up ${cleanedCount} corrupted Redis keys`);
       return cleanedCount;
     } catch (error) {

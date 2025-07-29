@@ -1,8 +1,8 @@
-import { Logger } from '@config/logger.config';
+import { ConnectionHealthService } from '@api/services/connection-health.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { SessionRestorationService } from '@api/services/session-restoration.service';
-import { ConnectionHealthService } from '@api/services/connection-health.service';
 import { Integration } from '@api/types/wa.types';
+import { Logger } from '@config/logger.config';
 
 export class GracefulShutdownService {
   private readonly logger = new Logger('GracefulShutdownService');
@@ -87,7 +87,6 @@ export class GracefulShutdownService {
 
       const shutdownTime = Date.now() - startTime;
       this.logger.info(`Graceful shutdown completed in ${shutdownTime}ms`);
-
     } catch (error) {
       this.logger.error(`Error during graceful shutdown process: ${error?.toString()}`);
       throw error;
@@ -119,7 +118,6 @@ export class GracefulShutdownService {
 
           await this.sessionRestorationService.persistInstanceState(instanceName, instanceData);
           this.logger.debug(`Saved state for instance: ${instanceName}`);
-
         } catch (error) {
           this.logger.error(`Failed to save state for instance ${instanceName}: ${error?.toString()}`);
         }
@@ -127,7 +125,6 @@ export class GracefulShutdownService {
 
       await Promise.allSettled(savePromises);
       this.logger.info(`Attempted to save ${instances.length} instance states`);
-
     } catch (error) {
       this.logger.error(`Failed to save instance states: ${error?.toString()}`);
       throw error;
@@ -148,7 +145,6 @@ export class GracefulShutdownService {
           if (instance.integration === Integration.WHATSAPP_BAILEYS) {
             await this.closeBaileysConnection(instanceName, instance);
           }
-
         } catch (error) {
           this.logger.error(`Failed to close connection for instance ${instanceName}: ${error?.toString()}`);
         }
@@ -156,7 +152,6 @@ export class GracefulShutdownService {
 
       await Promise.allSettled(closePromises);
       this.logger.info(`Attempted to close ${instances.length} connections`);
-
     } catch (error) {
       this.logger.error(`Failed to close connections: ${error?.toString()}`);
       throw error;
@@ -168,8 +163,8 @@ export class GracefulShutdownService {
       this.logger.debug(`Closing Baileys connection for instance: ${instanceName}`);
 
       // Set a timeout for connection closure
-      const closeTimeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connection close timeout')), 5000)
+      const closeTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Connection close timeout')), 5000),
       );
 
       const closeConnection = async () => {
@@ -178,7 +173,8 @@ export class GracefulShutdownService {
           instance.stateConnection.state = 'close';
 
           // Close WebSocket gracefully
-          if (instance.client.ws.readyState === 1) { // WebSocket.OPEN
+          if (instance.client.ws.readyState === 1) {
+            // WebSocket.OPEN
             instance.client.ws.close(1000, 'Graceful shutdown');
           }
 
@@ -191,7 +187,6 @@ export class GracefulShutdownService {
 
       await Promise.race([closeConnection(), closeTimeout]);
       this.logger.debug(`Successfully closed connection for instance: ${instanceName}`);
-
     } catch (error) {
       this.logger.warn(`Timeout or error closing connection for ${instanceName}: ${error.message}`);
       // Force close if graceful close fails
@@ -209,10 +204,9 @@ export class GracefulShutdownService {
       // This is a placeholder for any cleanup that might be needed
 
       // Give a moment for any pending operations to complete
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       this.logger.info('Resource cleanup completed');
-
     } catch (error) {
       this.logger.error(`Failed to clean up resources: ${error?.toString()}`);
       throw error;

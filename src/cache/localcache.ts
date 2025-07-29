@@ -109,7 +109,7 @@ export class LocalCache implements ICache {
   /**
    * Cleanup corrupted keys - No-op for local cache
    */
-  async cleanupCorruptedKeys(pattern?: string): Promise<number> {
+  async cleanupCorruptedKeys(): Promise<number> {
     // Local cache doesn't have type corruption issues like Redis
     return 0;
   }

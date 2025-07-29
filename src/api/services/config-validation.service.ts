@@ -1,5 +1,5 @@
-import { Logger } from '@config/logger.config';
 import { ConfigService } from '@config/env.config';
+import { Logger } from '@config/logger.config';
 
 export class ConfigValidationService {
   private readonly logger = new Logger('ConfigValidationService');
@@ -29,7 +29,7 @@ export class ConfigValidationService {
     // Report findings
     if (issues.length > 0) {
       this.logger.warn('Configuration issues detected:');
-      issues.forEach(issue => this.logger.warn(`- ${issue}`));
+      issues.forEach((issue) => this.logger.warn(`- ${issue}`));
       this.logger.warn('These issues may affect connection persistence and recovery');
     } else {
       this.logger.info('Configuration validation passed');
@@ -48,7 +48,9 @@ export class ConfigValidationService {
     }
 
     if (!db.CONNECTION.CLIENT_NAME || db.CONNECTION.CLIENT_NAME === 'evolution') {
-      issues.push('DATABASE_CONNECTION_CLIENT_NAME is using default value - may cause conflicts in multi-tenant environments');
+      issues.push(
+        'DATABASE_CONNECTION_CLIENT_NAME is using default value - may cause conflicts in multi-tenant environments',
+      );
     }
   }
 
@@ -79,10 +81,14 @@ export class ConfigValidationService {
       this.logger.info('DEL_INSTANCE is disabled - instances will never be auto-removed');
     } else if (typeof delInstance === 'number') {
       if (delInstance < 5) {
-        issues.push(`DEL_INSTANCE is set to ${delInstance} minutes - this may be too aggressive for connection recovery`);
+        issues.push(
+          `DEL_INSTANCE is set to ${delInstance} minutes - this may be too aggressive for connection recovery`,
+        );
       }
       if (delInstance > 60) {
-        this.logger.warn(`DEL_INSTANCE is set to ${delInstance} minutes - disconnected instances will persist for a long time`);
+        this.logger.warn(
+          `DEL_INSTANCE is set to ${delInstance} minutes - disconnected instances will persist for a long time`,
+        );
       }
     }
   }
@@ -121,7 +127,7 @@ export class ConfigValidationService {
   public isOptimalConfig(): boolean {
     const db = this.configService.get('DATABASE');
     const cache = this.configService.get('CACHE');
-    
+
     return (
       db.SAVE_DATA.INSTANCE &&
       cache.REDIS.ENABLED &&

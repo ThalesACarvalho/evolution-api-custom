@@ -40,13 +40,13 @@ import { S3Service } from './integrations/storage/s3/services/s3.service';
 import { ProviderFiles } from './provider/sessions';
 import { PrismaRepository } from './repository/repository.service';
 import { CacheService } from './services/cache.service';
+import { ConnectionHealthService } from './services/connection-health.service';
+import { GracefulShutdownService } from './services/graceful-shutdown.service';
 import { WAMonitoringService } from './services/monitor.service';
 import { ProxyService } from './services/proxy.service';
+import { SessionRestorationService } from './services/session-restoration.service';
 import { SettingsService } from './services/settings.service';
 import { TemplateService } from './services/template.service';
-import { ConnectionHealthService } from './services/connection-health.service';
-import { SessionRestorationService } from './services/session-restoration.service';
-import { GracefulShutdownService } from './services/graceful-shutdown.service';
 
 const logger = new Logger('WA MODULE');
 
@@ -83,10 +83,7 @@ export const sessionRestorationService = new SessionRestorationService(
   configService,
 );
 
-export const connectionHealthService = new ConnectionHealthService(
-  waMonitor,
-  cache,
-);
+export const connectionHealthService = new ConnectionHealthService(waMonitor, cache);
 
 export const gracefulShutdownService = new GracefulShutdownService(
   waMonitor,
@@ -114,13 +111,16 @@ eventEmitter.on('instance.state.remove', async (instanceName: string, instanceId
 });
 
 // Set up periodic session health check (every 5 minutes)
-setInterval(async () => {
-  try {
-    await sessionRestorationService.validateSessionHealth();
-  } catch (error) {
-    console.error('Session health check failed:', error);
-  }
-}, 5 * 60 * 1000); // 5 minutes
+setInterval(
+  async () => {
+    try {
+      await sessionRestorationService.validateSessionHealth();
+    } catch (error) {
+      console.error('Session health check failed:', error);
+    }
+  },
+  5 * 60 * 1000,
+); // 5 minutes
 
 const s3Service = new S3Service(prismaRepository);
 export const s3Controller = new S3Controller(s3Service);
