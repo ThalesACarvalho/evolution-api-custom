@@ -413,7 +413,11 @@ export class WAMonitoringService {
   }
 
   private removeInstance() {
-    this.eventEmitter.on('remove.instance', async (instanceName: string) => {
+    this.eventEmitter.on('remove.instance', async (instanceName: string, reason?: string) => {
+      this.logger.warn(
+        `[REMOVE_INSTANCE_EVENT] Instance "${instanceName}" - Remove event triggered with reason: ${reason || 'unknown'}`,
+      );
+
       try {
         await this.waInstances[instanceName]?.sendDataWebhook(Events.REMOVE_INSTANCE, null);
 
@@ -424,7 +428,7 @@ export class WAMonitoringService {
         this.cleaningUp(instanceName);
         this.cleaningStoreData(instanceName);
       } finally {
-        this.logger.warn(`Instance "${instanceName}" - REMOVED`);
+        this.logger.warn(`[REMOVE_INSTANCE_COMPLETE] Instance "${instanceName}" - REMOVED`);
       }
 
       try {
@@ -433,7 +437,11 @@ export class WAMonitoringService {
         this.logger.error(error);
       }
     });
-    this.eventEmitter.on('logout.instance', async (instanceName: string) => {
+    this.eventEmitter.on('logout.instance', async (instanceName: string, reason?: string) => {
+      this.logger.warn(
+        `[LOGOUT_INSTANCE_EVENT] Instance "${instanceName}" - Logout event triggered with reason: ${reason || 'unknown'}`,
+      );
+
       try {
         await this.waInstances[instanceName]?.sendDataWebhook(Events.LOGOUT_INSTANCE, null);
 
@@ -443,13 +451,15 @@ export class WAMonitoringService {
 
         this.cleaningUp(instanceName);
       } finally {
-        this.logger.warn(`Instance "${instanceName}" - LOGOUT`);
+        this.logger.warn(`[LOGOUT_INSTANCE_COMPLETE] Instance "${instanceName}" - LOGOUT`);
       }
     });
   }
 
   private noConnection() {
     this.eventEmitter.on('no.connection', async (instanceName) => {
+      this.logger.warn(`[NO_CONNECTION_EVENT] Instance "${instanceName}" - No connection event triggered`);
+
       try {
         await this.waInstances[instanceName]?.client?.logout('Log out instance: ' + instanceName);
 
@@ -457,6 +467,8 @@ export class WAMonitoringService {
 
         this.waInstances[instanceName].instance.qrcode = { count: 0 };
         this.waInstances[instanceName].stateConnection.state = 'close';
+
+        this.logger.warn(`[NO_CONNECTION_STATE_SET] Instance "${instanceName}" - State forcibly set to 'close'`);
       } catch (error) {
         this.logger.error({
           localError: 'noConnection',
@@ -464,7 +476,7 @@ export class WAMonitoringService {
           error,
         });
       } finally {
-        this.logger.warn(`Instance "${instanceName}" - NOT CONNECTION`);
+        this.logger.warn(`[NO_CONNECTION_COMPLETE] Instance "${instanceName}" - NOT CONNECTION`);
       }
     });
   }

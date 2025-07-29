@@ -236,6 +236,7 @@ export class BaileysStartupService extends ChannelStartupService {
   public stateConnection: wa.StateConnection = { state: 'close' };
 
   public phoneNumber: string;
+  private lastMessageSentTime: number = 0;
 
   public get connectionStatus() {
     // Verify consistency before returning status
@@ -250,22 +251,50 @@ export class BaileysStartupService extends ChannelStartupService {
     const currentState = this.stateConnection.state;
 
     // Log current status for debugging
-    this.logger.debug(`Instance ${this.instance.name} connection status check: ${currentState}`);
+    this.logger.debug(`[STATUS_CHECK] Instance ${this.instance.name} connection status check: ${currentState}`);
 
-    // If we have a client and it's connected, but our state isn't 'open', that's inconsistent
-    if (this.client && this.client.user && currentState !== 'open') {
-      this.logger.warn(
-        `Instance ${this.instance.name} connection status inconsistency detected. Client connected but state is '${currentState}'. Correcting to 'open'.`,
-      );
-      this.stateConnection.state = 'open';
+    // Check if we have a valid client and it's properly connected
+    const hasValidClient = this.client && this.client.user && this.client.user.id;
+    const clientAppearsConnected = hasValidClient && (!this.client.ws || (this.client.ws as any).readyState === 1); // WebSocket.OPEN = 1
+
+    // If we have a connected client but our state isn't 'open', that might be inconsistent
+    if (hasValidClient && currentState !== 'open') {
+      // Additional check: ensure the client is actually responsive
+      if (clientAppearsConnected) {
+        this.logger.warn(
+          `[STATUS_INCONSISTENCY] Instance ${this.instance.name} - Client appears connected but state is '${currentState}'. Investigating...`,
+        );
+
+        // Only correct to 'open' if we're confident the client is actually connected
+        // Don't auto-correct from 'connecting' as that might be a valid transition state
+        if (currentState === 'close') {
+          this.logger.warn(
+            `[STATUS_CORRECTION] Instance ${this.instance.name} - Correcting state from 'close' to 'open' as client appears connected`,
+          );
+          this.stateConnection.state = 'open';
+        }
+      } else {
+        this.logger.debug(
+          `[STATUS_CONSISTENT] Instance ${this.instance.name} - Client exists but may not be connected, state '${currentState}' appears correct`,
+        );
+      }
     }
 
-    // If we don't have a client but state is 'open', that's also inconsistent
-    if ((!this.client || !this.client.user) && currentState === 'open') {
+    // If we don't have a valid client but state is 'open', that's definitely inconsistent
+    if (!hasValidClient && currentState === 'open') {
       this.logger.warn(
-        `Instance ${this.instance.name} connection status inconsistency detected. No client but state is 'open'. Correcting to 'close'.`,
+        `[STATUS_INCONSISTENCY] Instance ${this.instance.name} - No valid client but state is 'open'. Correcting to 'close'.`,
       );
       this.stateConnection.state = 'close';
+    }
+
+    // Additional check for clients that appear disconnected
+    if (hasValidClient && !clientAppearsConnected && currentState === 'open') {
+      this.logger.warn(
+        `[STATUS_INCONSISTENCY] Instance ${this.instance.name} - Client exists but WebSocket appears disconnected. State: '${currentState}'`,
+      );
+      // Don't immediately change to 'close' - this could be a temporary network issue
+      // The connection.update handler should handle this properly
     }
   }
 
@@ -337,6 +366,10 @@ export class BaileysStartupService extends ChannelStartupService {
   }
 
   private async connectionUpdate({ qr, connection, lastDisconnect }: Partial<ConnectionState>) {
+    this.logger.debug(
+      `[CONNECTION_UPDATE] Instance ${this.instance.name}: Received connection update - connection: ${connection}, qr: ${!!qr}, lastDisconnect: ${!!lastDisconnect}`,
+    );
+
     // Ensure QR code is properly initialized
     this.ensureQrCodeInitialized();
 
@@ -486,6 +519,14 @@ export class BaileysStartupService extends ChannelStartupService {
 
     if (connection) {
       const previousState = this.stateConnection.state;
+
+      this.logger.info(
+        `[CONNECTION_STATE_TRANSITION] Instance ${this.instance.name}: State changing from '${previousState}' to '${connection}'`,
+      );
+
+      // Add timestamp to track when state changes occur
+      const transitionTime = Date.now();
+
       this.stateConnection = {
         state: connection,
         statusReason: (lastDisconnect?.error as Boom)?.output?.statusCode ?? 200,
@@ -493,49 +534,65 @@ export class BaileysStartupService extends ChannelStartupService {
 
       // Log connection state transitions for debugging
       if (previousState !== connection) {
-        this.logger.info(`Instance ${this.instance.name} connection state changed: ${previousState} -> ${connection}`);
+        this.logger.info(
+          `[CONNECTION_STATE_CHANGED] Instance ${this.instance.name}: Connection state changed: ${previousState} -> ${connection} at ${new Date(transitionTime).toISOString()}`,
+        );
+
+        // If transitioning to closed unexpectedly, log additional details
+        if (connection === 'close' && previousState === 'open') {
+          const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+          this.logger.warn(
+            `[UNEXPECTED_CLOSE] Instance ${this.instance.name}: Connection unexpectedly closed with status: ${statusCode}, error: ${lastDisconnect?.error?.message || 'No error message'}`,
+          );
+
+          // Check if client is actually still connected
+          if (this.client && this.client.user) {
+            this.logger.warn(
+              `[CLIENT_STILL_CONNECTED] Instance ${this.instance.name}: Client appears to still be connected despite close event`,
+            );
+          }
+        }
       }
     }
 
     if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      const codesToNotReconnect = [DisconnectReason.loggedOut, DisconnectReason.forbidden, 402, 406];
-      const shouldReconnect = !codesToNotReconnect.includes(statusCode);
-      if (shouldReconnect) {
-        await this.connectToWhatsapp(this.phoneNumber);
-      } else {
-        this.sendDataWebhook(Events.STATUS_INSTANCE, {
-          instance: this.instance.name,
-          status: 'closed',
-          disconnectionAt: new Date(),
-          disconnectionReasonCode: statusCode,
-          disconnectionObject: JSON.stringify(lastDisconnect),
-        });
 
-        await this.prismaRepository.instance.update({
-          where: { id: this.instanceId },
-          data: {
-            connectionStatus: 'close',
-            disconnectionAt: new Date(),
-            disconnectionReasonCode: statusCode,
-            disconnectionObject: JSON.stringify(lastDisconnect),
-          },
-        });
+      this.logger.warn(
+        `[CONNECTION_CLOSE] Instance ${this.instance.name}: Connection close event received with status code: ${statusCode}`,
+      );
 
-        if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-          this.chatwootService.eventWhatsapp(
-            Events.STATUS_INSTANCE,
-            { instanceName: this.instance.name, instanceId: this.instanceId },
-            { instance: this.instance.name, status: 'closed' },
+      // Add debouncing to prevent immediate close events right after message sending
+      // This helps avoid false disconnections due to temporary network issues
+      const timeSinceLastMessage = Date.now() - (this.lastMessageSentTime || 0);
+      const DEBOUNCE_DELAY = 5000; // 5 seconds
+
+      if (timeSinceLastMessage < DEBOUNCE_DELAY) {
+        this.logger.warn(
+          `[CONNECTION_CLOSE_DEBOUNCE] Instance ${this.instance.name}: Close event too soon after message (${timeSinceLastMessage}ms). Waiting ${DEBOUNCE_DELAY - timeSinceLastMessage}ms before processing...`,
+        );
+
+        // Delay processing the close event
+        setTimeout(async () => {
+          // Re-check if the connection is actually closed
+          if (this.client && this.client.user && (this.client.ws as any)?.readyState === 1) {
+            this.logger.info(
+              `[CONNECTION_CLOSE_CANCELLED] Instance ${this.instance.name}: Connection appears to still be active, ignoring close event`,
+            );
+            return;
+          }
+
+          this.logger.warn(
+            `[CONNECTION_CLOSE_CONFIRMED] Instance ${this.instance.name}: Connection confirmed closed after debounce delay`,
           );
-        }
+          this.processConnectionClose(statusCode, lastDisconnect);
+        }, DEBOUNCE_DELAY - timeSinceLastMessage);
 
-        this.eventEmitter.emit('logout.instance', this.instance.name, 'inner');
-        this.client?.ws?.close();
-        this.client.end(new Error('Close connection'));
-
-        this.sendDataWebhook(Events.CONNECTION_UPDATE, { instance: this.instance.name, ...this.stateConnection });
+        return; // Don't process the close immediately
       }
+
+      // Process close immediately if it's not too soon after a message
+      this.processConnectionClose(statusCode, lastDisconnect);
     }
 
     if (connection === 'open') {
@@ -633,6 +690,61 @@ export class BaileysStartupService extends ChannelStartupService {
 
       // Notify connection health service about connecting state
       this.eventEmitter.emit('instance.connecting', this.instance.name);
+    }
+  }
+
+  /**
+   * Process connection close event with proper validation and reconnection logic
+   */
+  private async processConnectionClose(statusCode: number, lastDisconnect: any) {
+    this.logger.warn(
+      `[PROCESS_CONNECTION_CLOSE] Instance ${this.instance.name}: Processing connection close with status: ${statusCode}`,
+    );
+
+    const codesToNotReconnect = [DisconnectReason.loggedOut, DisconnectReason.forbidden, 402, 406];
+    const shouldReconnect = !codesToNotReconnect.includes(statusCode);
+
+    if (shouldReconnect) {
+      this.logger.info(
+        `[CONNECTION_RECONNECT] Instance ${this.instance.name}: Attempting to reconnect due to status code: ${statusCode}`,
+      );
+      await this.connectToWhatsapp(this.phoneNumber);
+    } else {
+      this.logger.warn(
+        `[CONNECTION_PERMANENT_CLOSE] Instance ${this.instance.name}: Permanent disconnection with status: ${statusCode}`,
+      );
+
+      this.sendDataWebhook(Events.STATUS_INSTANCE, {
+        instance: this.instance.name,
+        status: 'closed',
+        disconnectionAt: new Date(),
+        disconnectionReasonCode: statusCode,
+        disconnectionObject: JSON.stringify(lastDisconnect),
+      });
+
+      await this.prismaRepository.instance.update({
+        where: { id: this.instanceId },
+        data: {
+          connectionStatus: 'close',
+          disconnectionAt: new Date(),
+          disconnectionReasonCode: statusCode,
+          disconnectionObject: JSON.stringify(lastDisconnect),
+        },
+      });
+
+      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
+        this.chatwootService.eventWhatsapp(
+          Events.STATUS_INSTANCE,
+          { instanceName: this.instance.name, instanceId: this.instanceId },
+          { instance: this.instance.name, status: 'closed' },
+        );
+      }
+
+      this.eventEmitter.emit('logout.instance', this.instance.name, 'connection_close');
+      this.client?.ws?.close();
+      this.client.end(new Error('Close connection'));
+
+      this.sendDataWebhook(Events.CONNECTION_UPDATE, { instance: this.instance.name, ...this.stateConnection });
     }
   }
 
@@ -2181,6 +2293,12 @@ export class BaileysStartupService extends ChannelStartupService {
     options?: Options,
     isIntegration = false,
   ) {
+    // Log connection state at the start of message sending
+    const connectionStateBefore = this.stateConnection.state;
+    this.logger.info(
+      `[MESSAGE_SEND_START] Instance ${this.instance.name}: Connection state before sending: ${connectionStateBefore}`,
+    );
+
     const isWA = (await this.whatsappNumber({ numbers: [number] }))?.shift();
 
     if (!isWA.exists && !isJidGroup(isWA.jid) && !isWA.jid.includes('@broadcast')) {
@@ -2400,6 +2518,34 @@ export class BaileysStartupService extends ChannelStartupService {
           pushName: messageRaw.pushName,
           isIntegration,
         });
+      }
+
+      // Log connection state at the end of message sending
+      const connectionStateAfter = this.stateConnection.state;
+      this.logger.info(
+        `[MESSAGE_SEND_END] Instance ${this.instance.name}: Connection state after sending: ${connectionStateAfter} (was: ${connectionStateBefore})`,
+      );
+
+      // Track the time of the last successful message send
+      this.lastMessageSentTime = Date.now();
+
+      // Check for unexpected state changes during message sending
+      if (connectionStateBefore === 'open' && connectionStateAfter !== 'open') {
+        this.logger.warn(
+          `[CONNECTION_STATE_CHANGE] Instance ${this.instance.name}: Connection state unexpectedly changed from '${connectionStateBefore}' to '${connectionStateAfter}' during message sending`,
+        );
+
+        // Verify if the client is actually still connected
+        if (this.client && this.client.user) {
+          this.logger.warn(
+            `[CONNECTION_RECOVERY] Instance ${this.instance.name}: Client appears still connected, attempting to restore 'open' state`,
+          );
+          this.stateConnection.state = 'open';
+
+          this.logger.info(`[CONNECTION_RECOVERY] Instance ${this.instance.name}: State restored to 'open'`);
+        } else {
+          this.logger.error(`[CONNECTION_LOST] Instance ${this.instance.name}: Client is actually disconnected`);
+        }
       }
 
       return messageRaw;

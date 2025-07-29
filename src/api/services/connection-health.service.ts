@@ -58,12 +58,16 @@ export class ConnectionHealthService {
       const connectionStatus = instance.connectionStatus;
       const client = instance.client;
 
+      this.logger.debug(`[HEALTH_CHECK] Instance ${instanceName}: Status = ${connectionStatus?.state}`);
+
       // Check if connection status claims to be open but WebSocket is closed
       if (connectionStatus?.state === 'open') {
         const isWebSocketOpen = this.isWebSocketHealthy(client);
 
         if (!isWebSocketOpen) {
-          this.logger.warn(`Instance ${instanceName}: Connection status mismatch detected`);
+          this.logger.warn(
+            `[HEALTH_MISMATCH] Instance ${instanceName}: Connection status mismatch detected - claims open but WebSocket unhealthy`,
+          );
           await this.handleConnectionMismatch(instanceName, instance);
           return;
         }
@@ -71,8 +75,24 @@ export class ConnectionHealthService {
         // Perform ping test for open connections
         const isPingSuccessful = await this.performPingTest(instanceName, client);
         if (!isPingSuccessful) {
-          this.logger.warn(`Instance ${instanceName}: Ping test failed`);
+          this.logger.warn(`[HEALTH_PING_FAIL] Instance ${instanceName}: Ping test failed for 'open' connection`);
           await this.handleConnectionFailure(instanceName, instance);
+        } else {
+          this.logger.debug(`[HEALTH_OK] Instance ${instanceName}: Connection healthy`);
+        }
+      }
+
+      // Check for connections marked as closed but actually still connected
+      if (connectionStatus?.state === 'close') {
+        const isWebSocketOpen = this.isWebSocketHealthy(client);
+        const hasValidClient = client && client.user && client.user.id;
+
+        if (isWebSocketOpen && hasValidClient) {
+          this.logger.warn(
+            `[HEALTH_FALSE_CLOSE] Instance ${instanceName}: Marked as closed but client appears connected - correcting state`,
+          );
+          await this.correctFalseDisconnection(instanceName, instance);
+          return;
         }
       }
 
@@ -80,7 +100,9 @@ export class ConnectionHealthService {
       if (connectionStatus?.state === 'connecting') {
         const connectingTime = await this.getConnectingTime(instanceName);
         if (connectingTime && Date.now() - connectingTime > this.CONNECTION_TIMEOUT) {
-          this.logger.warn(`Instance ${instanceName}: Connection timeout detected`);
+          this.logger.warn(
+            `[HEALTH_TIMEOUT] Instance ${instanceName}: Connection timeout detected after ${this.CONNECTION_TIMEOUT}ms`,
+          );
           await this.handleConnectionTimeout(instanceName, instance);
         }
       }
@@ -163,6 +185,65 @@ export class ConnectionHealthService {
       await instance.connectToWhatsapp(instance.phoneNumber);
     } catch (error) {
       this.logger.error(`Failed to handle connection timeout for ${instanceName}: ${error?.toString()}`);
+    }
+  }
+
+  private async correctFalseDisconnection(instanceName: string, instance: any) {
+    try {
+      this.logger.info(
+        `[CORRECT_FALSE_DISCONNECT] Instance ${instanceName}: Correcting false disconnection - client appears healthy`,
+      );
+
+      // Verify the client is really connected by performing a simple test
+      const isReallyConnected = await this.performPingTest(instanceName, instance.client);
+
+      if (isReallyConnected) {
+        this.logger.info(
+          `[CORRECT_FALSE_DISCONNECT] Instance ${instanceName}: Confirmed client is connected, restoring 'open' state`,
+        );
+
+        // Restore the connection state to open
+        instance.stateConnection.state = 'open';
+
+        // Update database to reflect correct status
+        try {
+          await instance.prismaRepository.instance.update({
+            where: { id: instance.instanceId },
+            data: { connectionStatus: 'open' },
+          });
+        } catch (error) {
+          this.logger.error(
+            `[CORRECT_FALSE_DISCONNECT] Failed to update database for ${instanceName}: ${error?.toString()}`,
+          );
+        }
+
+        // Send webhook notification about the correction
+        try {
+          await instance.sendDataWebhook('CONNECTION_UPDATE', {
+            instance: instanceName,
+            state: 'open',
+            corrected: true,
+            message: 'False disconnection corrected by health monitor',
+          });
+        } catch (error) {
+          this.logger.error(
+            `[CORRECT_FALSE_DISCONNECT] Failed to send webhook for ${instanceName}: ${error?.toString()}`,
+          );
+        }
+
+        this.logger.info(
+          `[CORRECT_FALSE_DISCONNECT] Instance ${instanceName}: Successfully corrected false disconnection`,
+        );
+      } else {
+        this.logger.warn(
+          `[CORRECT_FALSE_DISCONNECT] Instance ${instanceName}: Client verification failed, connection is actually closed`,
+        );
+        await this.handleConnectionFailure(instanceName, instance);
+      }
+    } catch (error) {
+      this.logger.error(
+        `[CORRECT_FALSE_DISCONNECT] Failed to correct false disconnection for ${instanceName}: ${error?.toString()}`,
+      );
     }
   }
 
