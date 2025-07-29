@@ -36,7 +36,8 @@ lerna-debug.log*
 # Project related
 /instances/*
 !/instances/.gitkeep
-/test/
+# Removed test exclusion to include connection status fix tests
+# /test/
 /src/env.yml
 /store
 *.env
