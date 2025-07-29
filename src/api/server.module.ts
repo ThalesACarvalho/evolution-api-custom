@@ -103,6 +103,16 @@ eventEmitter.on('instance.connected', async (instanceName: string) => {
   await connectionHealthService.onInstanceConnected(instanceName);
 });
 
+// Set up event listener for session persistence
+eventEmitter.on('instance.state.persist', async (instanceName: string, instanceData: any) => {
+  await sessionRestorationService.persistInstanceState(instanceName, instanceData);
+});
+
+// Set up event listener for session cleanup
+eventEmitter.on('instance.state.remove', async (instanceName: string, instanceId?: string) => {
+  await sessionRestorationService.removeInstanceState(instanceName, instanceId);
+});
+
 const s3Service = new S3Service(prismaRepository);
 export const s3Controller = new S3Controller(s3Service);
 

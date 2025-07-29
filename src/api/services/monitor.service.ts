@@ -266,7 +266,7 @@ export class WAMonitoringService {
     }
   }
 
-  private async setInstance(instanceData: InstanceDto) {
+  public async setInstance(instanceData: InstanceDto) {
     const instance = channelController.init(instanceData, {
       configService: this.configService,
       eventEmitter: this.eventEmitter,
@@ -375,6 +375,10 @@ export class WAMonitoringService {
     this.eventEmitter.on('remove.instance', async (instanceName: string) => {
       try {
         await this.waInstances[instanceName]?.sendDataWebhook(Events.REMOVE_INSTANCE, null);
+
+        // Clean up session state before removing instance
+        const instanceId = this.waInstances[instanceName]?.instanceId;
+        this.eventEmitter.emit('instance.state.remove', instanceName, instanceId);
 
         this.cleaningUp(instanceName);
         this.cleaningStoreData(instanceName);
